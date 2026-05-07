@@ -2,13 +2,14 @@
 #include <math.h>      // for fminf, fmaxf
 #include <string.h>    // for strlen
 #include <inttypes.h> //for formatting
-#include "driver/uart.h"
+#include <driver/uart.h>
+#include <esp_log.h>
 #include "uart_slcan.h"
-#include "can_mit_mode.h"
-#include "esp_log.h"
 
 
-const char *TAG_UART = "testudog_node_uart"; // FOR LOGGING
+const char *TAG_UART = "Testudog_UART"; // FOR LOGGING
+static QueueHandle_t uart_queue = NULL;
+static SemaphoreHandle_t slcan_mutex = NULL;
 static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st) {
 
     pos = fminf(fmaxf(P_MIN, pos), P_MAX);
@@ -49,8 +50,6 @@ bool parse_slcan( const char* input, slcan_frame_t *frame_can){
     }
     return true;
 }
-
-//receive
 
 //receive data from the JETSON in SLCAN format and convert it to send it to the TWAI/CAN Controller
 void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_frame_list_t *out_list) {
@@ -94,8 +93,22 @@ void receive_slcan(uint8_t *uart_buffer, size_t max_len_uart, slcan_frame_list_t
     }
 }
 
-
-
+motor_state unpack_reply(uint8_t* msg){
+    /// unpack ints from can buffer ///
+    const uint8_t id = msg[0]; //Driver ID
+    const int pos_int = (msg[1]<<8)|msg[2]; // Motor Position Data
+    const int vel_int = (msg[3]<<4)|(msg[4]>>4); // Motor Speed Data
+    const int tor_int = ((msg[4]&0xF)<<8)|msg[5]; //Motor Torque Data
+    const int tempt_int = msg[6] ; // Temperature range: -40~215
+    const uint8_t motor_error = msg[7] ; // motor error code
+     /// convert ints to floats ///
+    const float pos = uint_to_float(pos_int, P_MIN, P_MAX, 16);
+    const float vel = uint_to_float(vel_int, V_MIN, V_MAX, 12);
+    const float tor = uint_to_float(tor_int, -T_MIN, T_MAX, 12);
+    const float tempt = tempt_int;
+    motor_state packet_received = {id, pos, vel, tor, tempt-40, motor_error};
+    return packet_received;
+}
 
 //Send motor data via UART to the Jetson in SLCAN Format
 void transmit_slcan(const motor_state info_motor){
@@ -122,4 +135,8 @@ void transmit_slcan(const motor_state info_motor){
     //send command via UART 
     ESP_LOGI(TAG_UART,"Sending to UART  %s \n", slcan_command_transmit);
     uart_write_bytes(UART_NUM_2, &slcan_command_transmit, strlen(slcan_command_transmit));
+}
+
+void uart_init(){
+    
 }

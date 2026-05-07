@@ -1,5 +1,3 @@
-
-#include "can_mit_mode.h"
 #define UART_RXD_PIN GPIO_NUM_16
 #define UART_TXD_PIN GPIO_NUM_17
 #define UART_RTS_PIN (UART_PIN_NO_CHANGE) //18 not using it
@@ -11,21 +9,31 @@
 
 #define BUF_SIZE 2048
 #define LENGTH_UART_BUFFER 128
+#define LENGTH_SLCAN_DATA 8
 #define EVENT_QUEUE_SIZE 12
 
 #define MAX_FRAMES_PER_BUFFER 10 // Adjust based on expected UART traffic
 
+
+//receive
+typedef struct {
+    uint32_t driver_id;
+    float position;       
+    float velocity;         
+    float torque;
+    float temperature;
+    uint8_t motor_error;        
+} motor_state;
+
 typedef struct {
     uint32_t id;
     uint8_t dlc;
-    uint8_t data[LENGTH_CAN_BUFFER];
+    uint8_t data[LENGTH_SLCAN_DATA];
     bool is_extended;
     bool is_rtr;
 } slcan_frame_t;
 
 extern const char *TAG_UART; // FOR LOGGING
-
-
 
 typedef struct {
     slcan_frame_t frames[MAX_FRAMES_PER_BUFFER];
@@ -35,5 +43,7 @@ typedef struct {
 //void pack_motor_state_to_slcan( char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st);
 //void decode_slcan(uint8_t *uart_buffer);
 //bool parse_slcan( const char* input, slcan_frame_t *frame_can);
+//motor_state unpack_reply(uint8_t* msg);
 void receive_slcan( uint8_t *uart_buffer, size_t max_len_uart, slcan_frame_list_t *out_list );
 void transmit_slcan(const motor_state info_motor);
+void uart_init();
