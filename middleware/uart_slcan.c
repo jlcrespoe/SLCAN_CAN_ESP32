@@ -1,0 +1,125 @@
+#include <stdio.h>
+#include <math.h>      // for fminf, fmaxf
+#include <string.h>    // for strlen
+#include <inttypes.h> //for formatting
+#include "driver/uart.h"
+#include "uart_slcan.h"
+#include "can_mit_mode.h"
+#include "esp_log.h"
+
+
+const char *TAG_UART = "testudog_node_uart"; // FOR LOGGING
+static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st) {
+
+    pos = fminf(fmaxf(P_MIN, pos), P_MAX);
+    vel = fminf(fmaxf(V_MIN, vel), V_MAX);
+    t_ff = fminf(fmaxf(T_MIN, t_ff), T_MAX);
+    temp_c = fminf(fmaxf(C_MIN, temp_c), C_MAX);
+    
+    /// convert floats to unsigned ints ///
+    int p_int = float_to_uint(pos, P_MIN, P_MAX, 16);
+    int v_int = float_to_uint(vel, V_MIN, V_MAX, 12);
+    int t_int = float_to_uint(t_ff, T_MIN, T_MAX, 12);
+    int temp_c_int = float_to_uint(temp_c, C_MIN, C_MAX, 16);
+
+    const uint16_t p_int16 = p_int & 0xFFFF;
+    const uint16_t v_int12 = v_int & 0xFFF;
+    const uint16_t t_int12 = t_int & 0xFFF;
+    const uint16_t temp_c_int16 = temp_c_int & 0xFFFF;
+
+    //format a hex string that represents 8 bytes of data that's the max of standard SLCAN 
+    snprintf(msg, msg_size, "%04x%03x%03x%04x%01x\r", p_int16, v_int12, t_int12, temp_c_int16, mot_st);
+}
+
+//from ESP32 to MOTORS 
+bool parse_slcan( const char* input, slcan_frame_t *frame_can){
+    
+    //only considering standard frames by now
+    if(input[0] != 't' ) return false;
+    //id
+    char can_id[4] = {input[1], input[2], input[3],'\0'};
+    frame_can->id = (uint32_t) strtol(can_id, NULL, 16);
+    //dlc
+    frame_can->dlc = input[4] - '0';
+    if (frame_can->dlc > LENGTH_CAN_BUFFER) return false;
+    //data
+    for (size_t idx = 0; idx < frame_can-> dlc; idx++ ){
+        char byte_str[3] = {input[5+(idx*2)],input[6+(idx*2)],'\0'};
+        frame_can->data[idx] = (uint8_t) strtol(byte_str, NULL, 16);
+    }
+    return true;
+}
+
+//receive
+
+//receive data from the JETSON in SLCAN format and convert it to send it to the TWAI/CAN Controller
+void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_frame_list_t *out_list) {
+    out_list->count = 0;
+    size_t start = 0;
+    for (size_t idx = 0; idx < length_buffer_uart; idx++) {
+        if (uart_buffer[idx] == '\r') {
+            uart_buffer[idx] = '\0'; // Null-terminate frame
+            
+            slcan_frame_t frame_process;
+            if (parse_slcan((char*)&uart_buffer[start], &frame_process)) {
+                
+                // Safety check: don't overflow our "vector"
+                if (out_list->count < MAX_FRAMES_PER_BUFFER) {
+                    out_list->frames[out_list->count++] = frame_process;
+                } else {
+                    ESP_LOGW(TAG_UART, "Frame list full, dropping message");
+                }
+            }
+            start = idx + 1;
+        }
+    }
+}
+void receive_slcan(uint8_t *uart_buffer, size_t max_len_uart, slcan_frame_list_t *out_list) {
+    // Reset the count at the start
+    out_list->count = 0;
+
+    int len_received = uart_read_bytes(UART_NUM_2, uart_buffer, max_len_uart - 1, UART_TICKS);
+    
+    if (len_received <= 0) {
+        // No log here to avoid flooding the console if idle
+        return;
+    }
+
+    decode_slcan(uart_buffer, len_received, out_list);
+
+    // Final check for malformed data (missing \r at the end or non supported commands)
+    if (len_received > 0 && uart_buffer[len_received-1] != '\0') {
+        uart_buffer[len_received] = '\0';
+        ESP_LOGI(TAG_UART, "Partial data received: %s", uart_buffer);
+    }
+}
+
+
+
+
+//Send motor data via UART to the Jetson in SLCAN Format
+void transmit_slcan(const motor_state info_motor){
+
+    char slcan_command_transmit[LENGTH_CAN_BUFFER*4]; //22 bytes 0-20 tiiildd..[CR] , byte 21 \0
+    //Convert the float to its binary representation (4 bytes for single-precision, 8 for double).
+
+    char data_motor[LENGTH_CAN_BUFFER *4];//consider \0 in the string and an extra byte to secure no overflow
+    //creates the data hex string ,Numbers of dd pairs must match the data length DLC
+    pack_motor_state_to_slcan( 
+                data_motor, 
+                sizeof(data_motor),
+                info_motor.position,
+                info_motor.velocity,
+                info_motor.torque,
+                info_motor.temperature,
+                info_motor.motor_error);
+    //Embeddding the hex string into an SLCAN transmit command.
+    // Build SLCAN: tIIILDDDDDDDDDDDDDDD\r\0
+    //convert DLC
+    const char length_char = LENGTH_CAN_BUFFER + '0';  // 8 → '8'
+    snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
+         "t%03" PRIx32 "%c%.16s", info_motor.driver_id, length_char, data_motor);
+    //send command via UART 
+    ESP_LOGI(TAG_UART,"Sending to UART  %s \n", slcan_command_transmit);
+    uart_write_bytes(UART_NUM_2, &slcan_command_transmit, strlen(slcan_command_transmit));
+}
