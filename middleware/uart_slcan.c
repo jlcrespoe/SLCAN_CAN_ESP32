@@ -10,7 +10,7 @@
 
 const char *TAG_UART = "Testudog_UART"; // FOR LOGGING
 static QueueHandle_t uart_queue = NULL;
-static SemaphoreHandle_t slcan_mutex = NULL;
+static slcan_frame_list_t slcan_streams;  // static = invisible outside this file
 static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st) {
 
     pos = fminf(fmaxf(P_MIN, pos), P_MAX);
@@ -74,27 +74,28 @@ void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_frame_list
         }
     }
 }
-void receive_slcan(uint8_t *uart_buffer, size_t max_len_uart, slcan_frame_list_t *out_list) {
+const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uart) {
     // Reset the count at the start
-    out_list->count = 0;
+    slcan_streams.count = 0;
 
     int len_received = uart_read_bytes(UART_NUM_2, uart_buffer, max_len_uart - 1, UART_TICKS);
     
     if (len_received <= 0) {
         // No log here to avoid flooding the console if idle
-        return;
+        return &slcan_streams;
     }
 
-    decode_slcan(uart_buffer, len_received, out_list);
+    decode_slcan(uart_buffer, len_received, &slcan_streams);
 
     // Final check for malformed data (missing \r at the end or non supported commands)
     if (len_received > 0 && uart_buffer[len_received-1] != '\0') {
         uart_buffer[len_received] = '\0';
         ESP_LOGI(TAG_UART, "Partial data received: %s", uart_buffer);
     }
+    return &slcan_streams;
 }
 
-motor_state unpack_reply(uint8_t* msg){
+const motor_state unpack_reply(uint8_t* msg){
     /// unpack ints from can buffer ///
     const uint8_t id = msg[0]; //Driver ID
     const int pos_int = (msg[1]<<8)|msg[2]; // Motor Position Data
@@ -139,13 +140,8 @@ void transmit_slcan(const motor_state info_motor){
 }
 
 
-
-
-
-
 void uart_init(){
     esp_log_level_set(TAG_UART, ESP_LOG_INFO);
-    slcan_mutex  = xSemaphoreCreateMutex();
     //Last zero means no interrupts
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM_2, BUF_SIZE, BUF_SIZE, EVENT_QUEUE_SIZE, &uart_queue, 0));
     // Configure UART parameters

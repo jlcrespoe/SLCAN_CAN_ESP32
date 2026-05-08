@@ -16,7 +16,7 @@ const char *TAG_CAN = "Testudog_CAN"; // FOR LOGGING
 
 
 
-void comm_can_transmit_eid(const uint32_t driver_id, uint8_t *data) {
+void comm_can_transmit(const uint32_t driver_id, const uint8_t *data) {
       twai_message_t tx_msg = {
         .identifier = driver_id,
         .extd = 0,
@@ -64,6 +64,15 @@ void can_mit_mode_init() {
     }
     // xTaskCreatePinnedToCore(rx_printer_task, "can_rx_print", 4096, NULL, 8, NULL, tskNO_AFFINITY);
     ESP_LOGI(TAG_CAN, "TWAI Node created done.\n");
+}
+
+void init_motors(){
+    for(uint8_t motor_id = TESTUDOG_MOTOR_0; motor_id < NUMBERS_MOTORS ; motor_id++){
+        ESP_LOGI(TAG_CAN, "Starting MIT Mode on motor TESTUDOG 0x%u....", motor_id);
+        comm_can_transmit((uint32_t) motor_id, (uint8_t *)START_MIT_MODE);
+        vTaskDelay(pdMS_TO_TICKS(500)); //wait half second
+        ESP_LOGI(TAG_CAN, "MIT Mode started on motor TESTUDOG 0x%u....", motor_id);
+    }
 }
 
 

@@ -13,8 +13,8 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 // ========================================================================
 // TWAI/CAN Parameters and constants for ESP32 WROOM UE
 // ========================================================================
-#define TWAI_SENDER_TX_GPIO     4 // CAN TX PIN
-#define TWAI_SENDER_RX_GPIO     5 //CAN RX PIN
+#define TWAI_SENDER_TX_GPIO     18 // CAN TX PIN
+#define TWAI_SENDER_RX_GPIO     19 //CAN RX PIN
 #define TWAI_QUEUE_DEPTH        100 // Set at your own criteria
 #define TWAI_BITRATE            1000000  // 1MB  kbps bitrate
 #define LENGTH_CAN_BUFFER 8 //# max number of bytes data of standard CAN FRAME
@@ -67,8 +67,9 @@ extern const uint8_t SET_ZERO_POSITION[LENGTH_CAN_BUFFER];
 extern const uint8_t READ_MOTOR[LENGTH_CAN_BUFFER];
 extern const char *TAG_CAN; // FOR LOGGING
 
-void comm_can_transmit_eid(const uint32_t driver_id, uint8_t *data);
+void comm_can_transmit(const uint32_t driver_id, const uint8_t *data);
 void can_mit_mode_init();
+void init_motors();
 
 #ifdef __cplusplus
 }           // ← closes extern "C" {
