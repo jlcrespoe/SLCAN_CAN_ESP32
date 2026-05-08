@@ -4,6 +4,7 @@
 #include <inttypes.h> //for formatting
 #include <driver/uart.h>
 #include <esp_log.h>
+#include "motor_values.h"
 #include "uart_slcan.h"
 
 
@@ -42,7 +43,7 @@ bool parse_slcan( const char* input, slcan_frame_t *frame_can){
     frame_can->id = (uint32_t) strtol(can_id, NULL, 16);
     //dlc
     frame_can->dlc = input[4] - '0';
-    if (frame_can->dlc > LENGTH_CAN_BUFFER) return false;
+    if (frame_can->dlc > LENGTH_SLCAN_DATA) return false;
     //data
     for (size_t idx = 0; idx < frame_can-> dlc; idx++ ){
         char byte_str[3] = {input[5+(idx*2)],input[6+(idx*2)],'\0'};
@@ -113,10 +114,10 @@ motor_state unpack_reply(uint8_t* msg){
 //Send motor data via UART to the Jetson in SLCAN Format
 void transmit_slcan(const motor_state info_motor){
 
-    char slcan_command_transmit[LENGTH_CAN_BUFFER*4]; //22 bytes 0-20 tiiildd..[CR] , byte 21 \0
+    char slcan_command_transmit[LENGTH_SLCAN_DATA*4]; //22 bytes 0-20 tiiildd..[CR] , byte 21 \0
     //Convert the float to its binary representation (4 bytes for single-precision, 8 for double).
 
-    char data_motor[LENGTH_CAN_BUFFER *4];//consider \0 in the string and an extra byte to secure no overflow
+    char data_motor[LENGTH_SLCAN_DATA *4];//consider \0 in the string and an extra byte to secure no overflow
     //creates the data hex string ,Numbers of dd pairs must match the data length DLC
     pack_motor_state_to_slcan( 
                 data_motor, 
@@ -129,7 +130,7 @@ void transmit_slcan(const motor_state info_motor){
     //Embeddding the hex string into an SLCAN transmit command.
     // Build SLCAN: tIIILDDDDDDDDDDDDDDD\r\0
     //convert DLC
-    const char length_char = LENGTH_CAN_BUFFER + '0';  // 8 → '8'
+    const char length_char = LENGTH_SLCAN_DATA + '0';  // 8 → '8'
     snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
          "t%03" PRIx32 "%c%.16s", info_motor.driver_id, length_char, data_motor);
     //send command via UART 
@@ -137,6 +138,28 @@ void transmit_slcan(const motor_state info_motor){
     uart_write_bytes(UART_NUM_2, &slcan_command_transmit, strlen(slcan_command_transmit));
 }
 
+
+
+
+
+
 void uart_init(){
-    
+    esp_log_level_set(TAG_UART, ESP_LOG_INFO);
+    slcan_mutex  = xSemaphoreCreateMutex();
+    //Last zero means no interrupts
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_2, BUF_SIZE, BUF_SIZE, EVENT_QUEUE_SIZE, &uart_queue, 0));
+    // Configure UART parameters
+    uart_config_t uart_config = {
+        .baud_rate = UART_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,//enable for real implementation
+        .rx_flow_ctrl_thresh = UART_RTS_THRESHOLD,
+    };
+    ESP_ERROR_CHECK(uart_param_config(UART_NUM_2, &uart_config));
+    //Set UART Pins
+    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_2, UART_TXD_PIN, UART_RXD_PIN, UART_RTS_PIN, UART_CTS_PIN));
+    //
+    ESP_LOGI(TAG_UART, "UART testudog controller started \n");    
 }
