@@ -3,13 +3,14 @@
 #include <string.h>    // for strlen
 #include <inttypes.h> //for formatting
 #include <driver/uart.h>
+#define LOG_LOCAL_LEVEL ESP_LOG_INFO
 #include <esp_log.h>
 #include "motor_values.h"
 #include "uart_slcan.h"
 
 
 const char *TAG_UART = "Testudog_UART"; // FOR LOGGING
-static QueueHandle_t uart_queue = NULL;
+QueueHandle_t uart_queue = NULL;
 static slcan_frame_list_t slcan_streams;  // static = invisible outside this file
 static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st) {
 
@@ -106,7 +107,7 @@ const motor_state unpack_reply(uint8_t* msg){
      /// convert ints to floats ///
     const float pos = uint_to_float(pos_int, P_MIN, P_MAX, 16);
     const float vel = uint_to_float(vel_int, V_MIN, V_MAX, 12);
-    const float tor = uint_to_float(tor_int, -T_MIN, T_MAX, 12);
+    const float tor = uint_to_float(tor_int, T_MIN, T_MAX, 12);
     const float tempt = tempt_int;
     motor_state packet_received = {id, pos, vel, tor, tempt-40, motor_error};
     return packet_received;
@@ -141,7 +142,6 @@ void transmit_slcan(const motor_state info_motor){
 
 
 void uart_init(){
-    esp_log_level_set(TAG_UART, ESP_LOG_INFO);
     //Last zero means no interrupts
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM_2, BUF_SIZE, BUF_SIZE, EVENT_QUEUE_SIZE, &uart_queue, 0));
     // Configure UART parameters
@@ -157,5 +157,6 @@ void uart_init(){
     //Set UART Pins
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_2, UART_TXD_PIN, UART_RXD_PIN, UART_RTS_PIN, UART_CTS_PIN));
     //
-    ESP_LOGI(TAG_UART, "UART testudog controller started \n");    
+    ESP_LOGI(TAG_UART, "UART testudog controller started \n"); 
+    vTaskDelay(pdMS_TO_TICKS(1000)); //wait a second   
 }

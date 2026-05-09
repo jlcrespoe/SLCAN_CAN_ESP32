@@ -1,6 +1,7 @@
 #include <math.h>
 #include <string.h>
 #include <esp_err.h>
+#define LOG_LOCAL_LEVEL ESP_LOG_INFO
 #include <esp_log.h>
 #include <driver/twai.h>
 #include <freertos/FreeRTOS.h>
@@ -52,8 +53,8 @@ void pack_cmd( uint8_t * msg,  float p_des,  float v_des,  float kp,  float kd, 
 }
 
 void can_mit_mode_init() {
-    esp_log_level_set(TAG_CAN, ESP_LOG_INFO);
-    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(TWAI_SENDER_TX_GPIO, TWAI_SENDER_RX_GPIO, TWAI_MODE_NORMAL);
+
+    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(TWAI_TX_GPIO, TWAI_RX_GPIO, TWAI_MODE_NORMAL);
     g_config.tx_queue_len = 100;
     twai_timing_config_t t_config = TWAI_TIMING_CONFIG_1MBITS();
     twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
@@ -62,8 +63,14 @@ void can_mit_mode_init() {
         ESP_LOGI(TAG_CAN, "TWAI install failed");
         while (1);
     }
-    // xTaskCreatePinnedToCore(rx_printer_task, "can_rx_print", 4096, NULL, 8, NULL, tskNO_AFFINITY);
+
+    if (twai_start() != ESP_OK) {
+        ESP_LOGI(TAG_CAN, "TWAI start failed");
+        while (1);
+    }
+
     ESP_LOGI(TAG_CAN, "TWAI Node created done.\n");
+    vTaskDelay(pdMS_TO_TICKS(1000)); //wait a second
 }
 
 void init_motors(){

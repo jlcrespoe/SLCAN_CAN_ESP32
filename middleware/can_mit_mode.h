@@ -13,8 +13,8 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 // ========================================================================
 // TWAI/CAN Parameters and constants for ESP32 WROOM UE
 // ========================================================================
-#define TWAI_SENDER_TX_GPIO     18 // CAN TX PIN
-#define TWAI_SENDER_RX_GPIO     19 //CAN RX PIN
+#define TWAI_TX_GPIO GPIO_NUM_5 // CAN TX PIN
+#define TWAI_RX_GPIO GPIO_NUM_4 //CAN RX PIN
 #define TWAI_QUEUE_DEPTH        100 // Set at your own criteria
 #define TWAI_BITRATE            1000000  // 1MB  kbps bitrate
 #define LENGTH_CAN_BUFFER 8 //# max number of bytes data of standard CAN FRAME
