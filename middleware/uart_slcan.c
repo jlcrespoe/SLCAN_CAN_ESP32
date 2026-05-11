@@ -10,7 +10,7 @@
 
 
 const char *TAG_UART = "Testudog_UART"; // FOR LOGGING
-QueueHandle_t uart_queue = NULL;
+static QueueHandle_t uart_queue = NULL;
 static slcan_frame_list_t slcan_streams;  // static = invisible outside this file
 static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st) {
 
@@ -31,7 +31,7 @@ static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, fl
     const uint16_t temp_c_int16 = temp_c_int & 0xFFFF;
 
     //format a hex string that represents 8 bytes of data that's the max of standard SLCAN 
-    snprintf(msg, msg_size, "%04x%03x%03x%04x%01x\r", p_int16, v_int12, t_int12, temp_c_int16, mot_st);
+    snprintf(msg, msg_size, "%04x%03x%03x%04x%02x\r", p_int16, v_int12, t_int12, temp_c_int16, mot_st);
 }
 
 //from ESP32 to MOTORS 
@@ -79,10 +79,11 @@ const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uar
     // Reset the count at the start
     slcan_streams.count = 0;
 
-    int len_received = uart_read_bytes(UART_NUM_2, uart_buffer, max_len_uart - 1, UART_TICKS);
+    int len_received = uart_read_bytes(PORT_UART, uart_buffer, max_len_uart - 1, UART_TICKS);
     
     if (len_received <= 0) {
         // No log here to avoid flooding the console if idle
+        ESP_LOGI(TAG_UART, "Partial data received: %s", uart_buffer);
         return &slcan_streams;
     }
 
@@ -137,25 +138,25 @@ void transmit_slcan(const motor_state info_motor){
          "t%03" PRIx32 "%c%.16s", info_motor.driver_id, length_char, data_motor);
     //send command via UART 
     ESP_LOGI(TAG_UART,"Sending to UART  %s \n", slcan_command_transmit);
-    uart_write_bytes(UART_NUM_2, &slcan_command_transmit, strlen(slcan_command_transmit));
+    uart_write_bytes(PORT_UART, &slcan_command_transmit, strlen(slcan_command_transmit));
 }
 
 
 void uart_init(){
     //Last zero means no interrupts
-    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_2, BUF_SIZE, BUF_SIZE, EVENT_QUEUE_SIZE, &uart_queue, 0));
+    ESP_ERROR_CHECK(uart_driver_install(PORT_UART, BUF_SIZE, BUF_SIZE, EVENT_QUEUE_SIZE, &uart_queue, 0));
     // Configure UART parameters
     uart_config_t uart_config = {
         .baud_rate = UART_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,//enable for real implementation
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,// use software control if disabled
         .rx_flow_ctrl_thresh = UART_RTS_THRESHOLD,
     };
-    ESP_ERROR_CHECK(uart_param_config(UART_NUM_2, &uart_config));
+    ESP_ERROR_CHECK(uart_param_config(PORT_UART, &uart_config));
     //Set UART Pins
-    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_2, UART_TXD_PIN, UART_RXD_PIN, UART_RTS_PIN, UART_CTS_PIN));
+    ESP_ERROR_CHECK(uart_set_pin(PORT_UART, UART_TXD_PIN, UART_RXD_PIN, -1, -1));
     //
     ESP_LOGI(TAG_UART, "UART testudog controller started \n"); 
     vTaskDelay(pdMS_TO_TICKS(1000)); //wait a second   

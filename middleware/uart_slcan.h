@@ -6,6 +6,7 @@
 extern "C" {          // ← tells C++ linker: look for plain C names
 #endif
 
+#define PORT_UART UART_NUM_2
 #define UART_RXD_PIN 16
 #define UART_TXD_PIN 17
 #define UART_RTS_PIN (UART_PIN_NO_CHANGE) //18 not using it
