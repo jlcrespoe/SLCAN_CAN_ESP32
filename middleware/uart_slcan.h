@@ -49,12 +49,10 @@ typedef struct {
 } slcan_frame_list_t;
 
 extern const char *TAG_UART; // FOR LOGGING
-//void pack_motor_state_to_slcan( char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st);
-//void decode_slcan(uint8_t *uart_buffer);
-//bool parse_slcan( const char* input, slcan_frame_t *frame_can);
 const motor_state unpack_reply(uint8_t* msg);
 const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uart);
 void transmit_slcan(const motor_state info_motor);
+void print_UART_status();
 void uart_init();
 
 

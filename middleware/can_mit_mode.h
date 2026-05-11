@@ -69,8 +69,9 @@ extern const char *TAG_CAN; // FOR LOGGING
 
 void comm_can_transmit(const uint32_t driver_id, const uint8_t *data);
 void can_mit_mode_init();
+void print_CAN_status();
 void init_motors();
-
+void pack_mit_command( uint8_t * msg,  float p_des,  float v_des,  float kp,  float kd,  float t_ff);
 #ifdef __cplusplus
 }           // ← closes extern "C" {
 #endif
