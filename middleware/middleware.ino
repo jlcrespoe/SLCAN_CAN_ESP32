@@ -45,7 +45,6 @@ void slcan_to_can_task(void *pvParameters) {
 
 }
 
-
 // ============================================================
 // TASK 2: CAN Bus RX → Decode MIT MODE → Encode SLCAN Format → SLCAN (UART)
 // Safely processes CAN frames and forwards to Jetson via UART
@@ -56,8 +55,8 @@ void can_to_slcan_task(void *pvParameters) {
           //Receive message
           esp_err_t err = twai_receive(&can_msg, pdMS_TO_TICKS(100));
           if(err != ESP_OK) {
-            //ESP_LOGI(TAG_CAN, "Waiting for CAN frames...");
             print_CAN_status();
+            vTaskDelay(pdMS_TO_TICKS(1000));  
             continue;
           }
             // Now safe to log and process
@@ -65,11 +64,9 @@ void can_to_slcan_task(void *pvParameters) {
             motor_state motor_data = unpack_reply(can_msg.data);
               transmit_slcan(motor_data);
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));  
-    }
+        
 }
 
-}
 void setup(){
     //Don't forget to setup Core Level Debug to INFO To watch logs!!! Tools -> Core Debug
     esp_log_level_set(TAG_CAN, ESP_LOG_INFO);

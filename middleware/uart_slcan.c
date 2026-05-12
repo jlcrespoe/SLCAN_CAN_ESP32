@@ -167,11 +167,7 @@ void print_UART_status() {
     size_t buffered_size;
     // Check how many bytes are currently waiting in the RX ring buffer
     uart_get_buffered_data_len(PORT_UART, &buffered_size);
-
-    // Get specific UART error flags (Break, Frame error, Parity error, etc.)
-    // Note: This usually requires checking the event queue, 
-    // but we can log the current buffer fill level easily.
-    
+        
     ESP_LOGI(TAG_UART, "UART Stats | RX Buffer: %u/%d bytes", 
              buffered_size, BUF_SIZE);
 
