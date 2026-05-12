@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <math.h>      // for fminf, fmaxf
 #include <string.h>    // for strlen
@@ -10,6 +11,8 @@
 
 
 const char *TAG_UART = "Testudog_UART"; // FOR LOGGING
+const char COMMANDS_SLCAN[SUPPORTED_COMMANDS] = {'t','O','C'};
+bool state_slcan_channel = true;
 static QueueHandle_t uart_queue = NULL;
 static slcan_frame_list_t slcan_streams;  // static = invisible outside this file
 
@@ -95,6 +98,46 @@ static void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_fra
         ptr = frame_end + 1; // Move to the next potential frame
     }
 }
+
+void set_special_command(uint8_t special_cmd){
+    switch(special_cmd){
+        case 2:
+            state_slcan_channel = false;
+            ESP_LOGI(TAG_UART, "Closed SLCAN Channel");
+            break;
+        case 1:
+            state_slcan_channel = true;
+            ESP_LOGI(TAG_UART, "Opened SLCAN Channel");
+            break;
+        default:
+            char* channel_state_action = state_slcan_channel ? "Open" : "Close";
+            ESP_LOGI(TAG_UART, "SLCAN CHANNEL STATUS: %s", channel_state_action);
+            break;
+    }
+}
+
+//Currently only supports Open, Close Channel  special commands
+void search_and_set_special_command(uint8_t *uart_buffer){
+    char *ptr = (char *)uart_buffer;
+    char *frame_end;
+    // Use strchr to find each terminator in the buffer
+    while ((frame_end = strchr(ptr, '\r')) != NULL) {
+        // check the FIRST char of the frame
+        char check_command = *ptr;
+        // 
+        for (int idx = SUPPORTED_COMMANDS - 1; idx >= 0; idx--) {
+            if (check_command == COMMANDS_SLCAN[idx]) {
+                set_special_command(idx);
+                break; // found a match, stop searching
+            }
+        }
+
+        ptr = frame_end + 1; // ✅ advance past current frame
+    }
+}
+
+
+
 const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uart) {
     // Reset the count at the start
     slcan_streams.count = 0;

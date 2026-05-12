@@ -20,6 +20,7 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 #define LENGTH_UART_BUFFER 128
 #define LENGTH_SLCAN_DATA 8 // equivalent to LENGTH_CAN_BUFFER
 #define EVENT_QUEUE_SIZE 12
+#define SUPPORTED_COMMANDS 3
 
 #define MAX_FRAMES_PER_BUFFER 10 // Adjust based on expected UART traffic
 
@@ -49,6 +50,8 @@ typedef struct {
 } slcan_frame_list_t;
 
 extern const char *TAG_UART; // FOR LOGGING
+extern const char COMMANDS_SLCAN[SUPPORTED_COMMANDS];
+extern bool state_slcan_channel;
 const motor_state unpack_reply(uint8_t* msg);
 const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uart);
 void transmit_slcan(const motor_state info_motor);

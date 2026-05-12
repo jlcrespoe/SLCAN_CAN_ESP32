@@ -12,33 +12,40 @@
 void slcan_to_can_task(void *pvParameters) {
     uint8_t uart_receive[256]; // Ensure this matches your expected MTU
     for (;;) {
-        // 1. Receive and Decode
-        // We pass the address of our list struct to be filled
-        const slcan_frame_list_t *streams_can = receive_slcan(uart_receive, sizeof(uart_receive));
+        if(state_slcan_channel){
+            // 1. Receive and Decode
+            // We pass the address of our list struct to be filled
+            const slcan_frame_list_t *streams_can = receive_slcan(uart_receive, sizeof(uart_receive));
 
-        // 2. Check if we actually got frames (count > 0)
-        if (streams_can -> count == 0) {
-            print_UART_status();
-            // Optional: short delay to prevent watchdog issues if UART is empty
-            vTaskDelay(pdMS_TO_TICKS(1000)); 
-            continue;
-            
+            // 2. Check if we actually got frames (count > 0)
+            if (streams_can -> count == 0) {
+                print_UART_status();
+                // Optional: short delay to prevent watchdog issues if UART is empty
+                vTaskDelay(pdMS_TO_TICKS(1000)); 
+                continue;
+                
+            }
+            ESP_LOGI(TAG_UART, "Received a total of %u streams", streams_can -> count);
+            // 3. Iterate through the frames and send to TWAI
+            for (size_t idx = 0; idx < streams_can -> count; idx++) {
+
+                const slcan_frame_t *command = &streams_can -> frames[idx];
+                const uint8_t* data_can = (uint8_t *)command->data;
+
+                // Send to CAN bus
+                comm_can_transmit(
+                    command->id, 
+                    data_can
+                );
+
+            //Search for special commands
+            //search_and_set_special_command(uart_receive);
         }
-        ESP_LOGI(TAG_UART, "Received a total of %u streams", streams_can -> count);
-        // 3. Iterate through the frames and send to TWAI
-        for (size_t idx = 0; idx < streams_can -> count; idx++) {
 
-            const slcan_frame_t *command = &streams_can -> frames[idx];
-            const uint8_t* data_can = (uint8_t *)command->data;
 
-            // Send to CAN bus
-            comm_can_transmit(
-                command->id, 
-                data_can
-            );
 
-            //uart_flush(PORT_UART); //clear the buffer
         }
+
         // 4. Small yield to let other tasks run
         vTaskDelay(pdMS_TO_TICKS(10)); 
     }
@@ -77,7 +84,7 @@ void setup(){
     //Set up UAART Controller
     uart_init();
     ESP_LOGI(TAG_UART, "HEY UART READY");
-    //set motors to MIT MODE 
+    //start all motors to MIT MODE 
     //init_motors();
     #if defined(TWAI_SLNT_PIN)
         pinMode(TWAI_SLNT_PIN, OUTPUT);
