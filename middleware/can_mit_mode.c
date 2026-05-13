@@ -8,21 +8,23 @@
 #include "motor_values.h"
 #include "can_mit_mode.h"
 
+//Hold the general commands 
+static const  motor_command MOTOR_CMDS_MIT[] = {
+    {START_READ_MIT, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC}}, //enter MIT Mode or read motors if already MIT Mode started 
+    {EXIT_MIT, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD}}, //exit MIT Mode
+    {SET_HOME_MIT, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}} //set zero position
+};
 
-const uint8_t START_MIT_MODE[LENGTH_CAN_BUFFER] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,0xFC };
-const uint8_t EXIT_MIT_MODE[LENGTH_CAN_BUFFER] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD };
-const uint8_t SET_ZERO_POSITION[LENGTH_CAN_BUFFER] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE };
-const uint8_t READ_MOTOR[LENGTH_CAN_BUFFER] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC };
 const char *TAG_CAN = "Testudog_CAN"; // FOR LOGGING
 
 void comm_can_transmit(const uint32_t driver_id, const uint8_t *data) {
-      twai_message_t tx_msg = {
-        .identifier = driver_id,
-        .extd = 0,
-        .rtr = 0,
-        .data_length_code = LENGTH_CAN_BUFFER,
+    twai_message_t tx_msg = {
+    .identifier = driver_id,
+    .extd = 0,
+    .rtr = 0,
+    .data_length_code = LENGTH_CAN_BUFFER,
 
-      };
+    };
     memcpy(tx_msg.data, data, tx_msg.data_length_code);
     char hex_str[LENGTH_CAN_BUFFER * 3 + 1]; // "AA BB CC ..." + \0
     for (uint8_t byte_idx = 0; byte_idx < LENGTH_CAN_BUFFER; byte_idx++) {
@@ -54,6 +56,7 @@ void can_mit_mode_init() {
 }
 
 void print_CAN_status() {
+
   twai_status_info_t status;
   twai_get_status_info(&status);
   ESP_LOGI(TAG_CAN, "  State: %d | TX err: %d | RX err: %d | TX pending: %d\n",
@@ -62,12 +65,15 @@ void print_CAN_status() {
     status.rx_error_counter,
     status.msgs_to_tx);
 }
-void init_motors(){
+
+
+void command_to_all_motors(int action){
+
     for(uint8_t motor_id = TESTUDOG_MOTOR_0; motor_id < NUMBERS_MOTORS ; motor_id++){
-        ESP_LOGI(TAG_CAN, "Starting MIT Mode on motor TESTUDOG 0x%u....", motor_id);
-        comm_can_transmit((uint32_t) motor_id, (uint8_t *)START_MIT_MODE);
+        ESP_LOGI(TAG_CAN, "MIT action %i mode on TESTUDOG motor 0x%u....", action, motor_id);
+        comm_can_transmit((uint32_t) motor_id, (uint8_t *)MOTOR_CMDS_MIT[action].command);
         vTaskDelay(pdMS_TO_TICKS(500)); //wait half second
-        ESP_LOGI(TAG_CAN, "MIT Mode started on motor TESTUDOG 0x%u....", motor_id);
+        ESP_LOGI(TAG_CAN, "Done on %u | %u",motor_id, NUMBERS_MOTORS);
     }
 }
 

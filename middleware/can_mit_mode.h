@@ -38,6 +38,13 @@ typedef enum {
     TESTUDOG_MOTOR_11, 
 }TESTUDOG_CAN_IDS;
 
+//MIT MODES ID COMMANDS
+typedef enum {
+    START_READ_MIT = 0x00,
+    EXIT_MIT,
+    SET_HOME_MIT,
+}MIT_MODE_CMD;
+
 // ========================================================================
 // Structures for sending and receiving in MIT MODE via CAN BUS
 // ========================================================================
@@ -51,26 +58,22 @@ typedef struct {
     float k_derivate;      
 } motor_parameters;  
 
-//be able to see values
+
 typedef struct {
-    uint32_t id;
-    uint8_t dlc;
-    uint8_t data[LENGTH_CAN_BUFFER];
-} can_rx_msg_t;
+    uint8_t command[LENGTH_CAN_BUFFER];
+    int action;
+} motor_command; 
+
 
 // ========================================================================
 // CAN/TWAI MIT MODE Special CAN Codes
 // ========================================================================
-extern const uint8_t START_MIT_MODE[LENGTH_CAN_BUFFER];
-extern const uint8_t EXIT_MIT_MODE[LENGTH_CAN_BUFFER];
-extern const uint8_t SET_ZERO_POSITION[LENGTH_CAN_BUFFER];
-extern const uint8_t READ_MOTOR[LENGTH_CAN_BUFFER];
 extern const char *TAG_CAN; // FOR LOGGING
 
 void comm_can_transmit(const uint32_t driver_id, const uint8_t *data);
 void can_mit_mode_init();
 void print_CAN_status();
-void init_motors();
+void command_to_all_motors(int action);
 void pack_mit_command( uint8_t * msg,  float p_des,  float v_des,  float kp,  float kd,  float t_ff);
 #ifdef __cplusplus
 }           // ← closes extern "C" {

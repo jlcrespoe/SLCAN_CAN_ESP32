@@ -40,16 +40,14 @@ void slcan_to_can_task(void *pvParameters) {
 
             //Search for special commands
             //search_and_set_special_command(uart_receive);
+
+            // 4. Small yield to let other tasks run
+            vTaskDelay(pdMS_TO_TICKS(10)); 
+            }
+        } else {
+            ESP_LOGI(TAG_UART, "UART Channel is closed");   
         }
-
-
-
-        }
-
-        // 4. Small yield to let other tasks run
-        vTaskDelay(pdMS_TO_TICKS(10)); 
     }
-
 }
 
 // ============================================================
@@ -85,7 +83,7 @@ void setup(){
     uart_init();
     ESP_LOGI(TAG_UART, "HEY UART READY");
     //start all motors to MIT MODE 
-    //init_motors();
+    //command_to_all_motors(START_READ_MIT);
     #if defined(TWAI_SLNT_PIN)
         pinMode(TWAI_SLNT_PIN, OUTPUT);
         digitalWrite(TWAI_SLNT_PIN, LOW);  // LOW = normal operation

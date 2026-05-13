@@ -16,6 +16,7 @@ bool state_slcan_channel = true;
 static QueueHandle_t uart_queue = NULL;
 static slcan_frame_list_t slcan_streams;  // static = invisible outside this file
 
+
 static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st) {
 
     //Linear Mapping (Converting physical units to raw integers)
@@ -202,7 +203,7 @@ void transmit_slcan(const motor_state info_motor){
          "t%03" PRIx32 "8%.16s\r", info_motor.driver_id, data_motor);
 
     //send command via UART 
-    ESP_LOGI(TAG_UART,"Sending to UART slcan  %s \n", slcan_command_transmit);
+    ESP_LOGI(TAG_UART,"Sending to UART slcan  %s", slcan_command_transmit);
     uart_write_bytes(PORT_UART, slcan_command_transmit, strlen(slcan_command_transmit));
 }
 

@@ -1,7 +1,6 @@
 #ifndef UART_SLCAN_H
 #define UART_SLCAN_H
 
-
 #ifdef __cplusplus
 extern "C" {          // ← tells C++ linker: look for plain C names
 #endif
@@ -48,6 +47,9 @@ typedef struct {
     slcan_frame_t frames[MAX_FRAMES_PER_BUFFER];
     size_t count;
 } slcan_frame_list_t;
+
+
+
 
 extern const char *TAG_UART; // FOR LOGGING
 extern const char COMMANDS_SLCAN[SUPPORTED_COMMANDS];
