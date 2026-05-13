@@ -8,6 +8,7 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 
 // ========================================================================
 // MIT MODE CONTROL COMMUNICATION PROTOCOL CONSTANTS FOR CUBERMARS MOTOR AK80-6
+// check documentation at https://www.cubemars.com/images/file/20240102/1704163364483999.pdf
 // ========================================================================
 /// limit data to be within bounds ///
 #define P_MAX  12.5f

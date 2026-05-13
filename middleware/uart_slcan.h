@@ -5,6 +5,10 @@
 extern "C" {          // ← tells C++ linker: look for plain C names
 #endif
 
+// ========================================================================
+// UART Parameters and constants for ESP32
+// ========================================================================
+
 #define PORT_UART UART_NUM_2
 #define UART_RXD_PIN 16
 #define UART_TXD_PIN 17
@@ -23,15 +27,18 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 
 #define MAX_FRAMES_PER_BUFFER 10 // Adjust based on expected UART traffic
 
+// ========================================================================
+// Structures to process slcan frames & motor state
+// ========================================================================
 
 //receive
 typedef struct {
     uint32_t driver_id;
-    float position;       
-    float velocity;         
+    float position;
+    float velocity;
     float torque;
     float temperature;
-    uint8_t motor_error;        
+    uint8_t motor_error;
 } motor_state;
 
 typedef struct {
@@ -42,16 +49,12 @@ typedef struct {
     bool is_rtr;
 } slcan_frame_t;
 
-
 typedef struct {
     slcan_frame_t frames[MAX_FRAMES_PER_BUFFER];
     size_t count;
 } slcan_frame_list_t;
 
-
-
-
-extern const char *TAG_UART; // FOR LOGGING
+extern const char *TAG_UART;
 extern const char COMMANDS_SLCAN[SUPPORTED_COMMANDS];
 extern bool state_slcan_channel;
 const motor_state unpack_reply(uint8_t* msg);
@@ -60,10 +63,9 @@ void transmit_slcan(const motor_state info_motor);
 void print_UART_status();
 void uart_init();
 
-
 #ifdef __cplusplus
 }           // ← closes extern "C" {
 #endif
 
 
-#endif // CAN_MIT_MODE_H
+#endif // UART_SLCAN_H

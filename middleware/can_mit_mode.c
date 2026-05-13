@@ -8,7 +8,7 @@
 #include "motor_values.h"
 #include "can_mit_mode.h"
 
-//Hold the general commands 
+//Hold the general commands
 static const  motor_command MOTOR_CMDS_MIT[] = {
     {START_READ_MIT, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC}}, //enter MIT Mode or read motors if already MIT Mode started 
     {EXIT_MIT, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD}}, //exit MIT Mode
@@ -17,6 +17,19 @@ static const  motor_command MOTOR_CMDS_MIT[] = {
 
 const char *TAG_CAN = "Testudog_CAN"; // FOR LOGGING
 
+/**
+ * @brief Transmit CAN message to a specific motor
+ *
+ * Prepares and transmits a CAN message to the specified motor ID via the TWAI interface.
+ * Converts the data to a CAN frame, logs the transmission in hexadecimal format, and
+ * sends it with a 100ms timeout.
+ *
+ * @param driver_id The CAN ID of the motor (0x00 to 0x0B for motors 0-11)
+ * @param data Pointer to an 8-byte array containing the CAN message payload
+ *
+ * @note The function blocks until the message is queued or timeout occurs
+ * @see comm_can_transmit() is typically called after pack_mit_command()
+ */
 void comm_can_transmit(const uint32_t driver_id, const uint8_t *data) {
     twai_message_t tx_msg = {
     .identifier = driver_id,
@@ -31,13 +44,28 @@ void comm_can_transmit(const uint32_t driver_id, const uint8_t *data) {
         snprintf(hex_str + (byte_idx * 3), 4, "%02X ", data[byte_idx]);
     }
     ESP_LOGI(TAG_CAN, "Sending CAN data: %s", hex_str);
-    ESP_ERROR_CHECK(twai_transmit(&tx_msg, pdMS_TO_TICKS(100)));  // Timeout = 0: returns immediately if queue is full
+    // Timeout = 0: returns immediately if queue is full
+    ESP_ERROR_CHECK(twai_transmit(&tx_msg, pdMS_TO_TICKS(100)));
 }
 
+/**
+ * @brief Initialize the TWAI/CAN interface for MIT mode communication
+ *
+ * Sets up the TWAI driver with:
+ * - 1 Mbps bitrate configuration
+ * - TX queue length of x messages
+ * - Acceptance of all CAN IDs (no filtering)
+ * - Normal mode operation (not loopback)
+ *
+ * Installs the driver, starts it, and waits 1 second for initialization to complete.
+ * Enters infinite loop if driver installation or start fails.
+ *
+ * @see TWAI_TX_GPIO, TWAI_RX_GPIO, LENGTH_CAN_BUFFER definitions
+ */
 void can_mit_mode_init() {
 
     twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(TWAI_TX_GPIO, TWAI_RX_GPIO, TWAI_MODE_NORMAL);
-    g_config.tx_queue_len = 100;
+    g_config.tx_queue_len = TWAI_QUEUE_DEPTH;
     twai_timing_config_t t_config = TWAI_TIMING_CONFIG_1MBITS();
     twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
@@ -55,18 +83,45 @@ void can_mit_mode_init() {
     vTaskDelay(pdMS_TO_TICKS(1000)); //wait a second
 }
 
+/**
+ * @brief Print the current CAN/TWAI bus status
+ *
+ * Retrieves and logs the status information from the TWAI driver, including:
+ * - Current bus state:
+ *      0x000. ESP_OK: Status information retrieved
+        0x102 ESP_ERR_INVALID_ARG: Arguments are invalid
+        0x103 ESP_ERR_INVALID_STATE: TWAI driver is not installed
+ * - TX error counter
+ * - RX error counter
+ * - Number of pending TX messages
+ *
+ * @note Useful for debugging CAN communication issues
+ */
 void print_CAN_status() {
 
-  twai_status_info_t status;
-  twai_get_status_info(&status);
-  ESP_LOGI(TAG_CAN, "  State: %d | TX err: %d | RX err: %d | TX pending: %d\n",
+    twai_get_status_info(&status);
+    ESP_LOGI(TAG_CAN, "  State: %d | TX err: %d | RX err: %d | TX pending: %d\n",
     status.state,
     status.tx_error_counter,
     status.rx_error_counter,
     status.msgs_to_tx);
 }
 
-
+/**
+ * @brief Send the same MIT mode command to all motors sequentially
+ *
+ * Iterates through all N motors (TESTUDOG_MOTOR_0 to TESTUDOG_MOTOR_11) and sends
+ * the specified MIT mode command to each motor with a delay between commands.
+ * This is typically used for:
+ * - Entering MIT mode on all motors (START_READ_MIT)
+ * - Exiting MIT mode on all motors (EXIT_MIT)
+ * - Setting home position on all motors (SET_HOME_MIT)
+ *
+ * @param action The MIT mode command index: START_READ_MIT (0), EXIT_MIT (1), or SET_HOME_MIT (2)
+ *
+ * @see MOTOR_CMDS_MIT array for available commands
+ * @see NUMBERS_MOTORS constant for motor count
+ */
 void command_to_all_motors(int action){
 
     for(uint8_t motor_id = TESTUDOG_MOTOR_0; motor_id < NUMBERS_MOTORS ; motor_id++){
@@ -77,7 +132,29 @@ void command_to_all_motors(int action){
     }
 }
 
-
+/**
+ * @brief Pack motor control parameters into CAN message format
+ *
+ * Encodes desired position, velocity, and PD control gains into an 8-byte CAN message
+ * following the MIT actuator communication protocol:
+ * - Position (p_des): 16 bits
+ * - Velocity (v_des): 12 bits
+ * - Proportional gain (kp): 12 bits
+ * - Derivative gain (kd): 12 bits
+ * - Feedforward torque (t_ff): 12 bits
+ *
+ * All input values are clamped to their min/max bounds before encoding.
+ *
+ * @param msg Pointer to 8-byte array where the packed message is stored
+ * @param p_des Desired position in radians [-12.5, 12.5]
+ * @param v_des Desired velocity in rad/s [-76.0, 76.0]
+ * @param kp Proportional gain [0, 500.0]
+ * @param kd Derivative gain [0, 5.0]
+ * @param t_ff Feedforward torque in Nm [-12.0, 12.0]
+ *
+ * @note Values are automatically clamped to valid ranges before encoding
+ * @see comm_can_transmit() to send the packed message
+ */
 void pack_mit_command( uint8_t * msg,  float p_des,  float v_des,  float kp,  float kd,  float t_ff) {
     p_des = fminf(fmaxf(P_MIN, p_des), P_MAX);
     v_des = fminf(fmaxf(V_MIN, v_des), V_MAX);
