@@ -348,7 +348,7 @@ void transmit_slcan(const motor_state info_motor){
 
     char data_motor[LENGTH_SLCAN_DATA *4];//buffer to store the string of data
     //creates the data hex string ,Numbers of dd pairs must match the data length DLC
-    ESP_LOGI(TAG_UART, "Motor ID: %u | P: %.2f rad | V: %.2f rad/s | I: %.2f A | T: %.2f C | err: %u",
+    ESP_LOGI(TAG_UART, "Motor State ID: %u | P: %.2f rad | V: %.2f rad/s | I: %.2f A | T: %.2f C | err: %u",
                 info_motor.driver_id,
                 info_motor.position,
                 info_motor.velocity,
