@@ -38,7 +38,6 @@ void slcan_to_can_task(void *pvParameters) {
     uint8_t uart_receive[256]; // Ensure this matches your expected MTU
     for (;;) {
         //if the channel is close can't send from JETSON
-        if(state_slcan_channel){
             // 1. Receive and Decode
             // We pass the address of our list struct to be filled
             const slcan_frame_list_t *streams_can = receive_slcan(uart_receive, sizeof(uart_receive));
@@ -63,18 +62,10 @@ void slcan_to_can_task(void *pvParameters) {
                     command->id,
                     data_can
                 );
-
-            //Search for special commands
-            //search_and_set_special_command(uart_receive);
-
             // 4. Small yield to let other tasks run
             vTaskDelay(pdMS_TO_TICKS(10));
             }
-        } else {
-            ESP_LOGI(TAG_UART, "UART Channel is closed");
-        }
-        //Check for special commands
-        //search_and_set_special_command(uart_receive);
+
     }
 }
 
@@ -113,7 +104,6 @@ void can_to_slcan_task(void *pvParameters) {
     twai_message_t  can_msg;
     for (;;) {
         //if the channel is close can't receive from CAN
-        if(state_slcan_channel){
           //Receive message
         esp_err_t err = twai_receive(&can_msg, pdMS_TO_TICKS(100));
         if(err != ESP_OK) {
@@ -125,10 +115,8 @@ void can_to_slcan_task(void *pvParameters) {
         ESP_LOGI(TAG_CAN, "Received ID: 0x%lx DLC: %d", can_msg.identifier, can_msg.data_length_code);
         motor_state motor_data = unpack_reply(can_msg.data);
         transmit_slcan(motor_data);
-        }
-        //Check for special commands
-        //search_and_set_special_command(uart_receive);
-        }
+        
+    }
 
 }
 

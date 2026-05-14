@@ -35,4 +35,4 @@ float uint_to_float(int x_int, float x_min, float x_max, int bits);
 }           // ← closes extern "C" {
 #endif
 
-#endif // CAN_MIT_MODE_H
+#endif // MOTOR_VALUES_H

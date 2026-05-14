@@ -96,7 +96,10 @@ static bool parse_slcan( const char* input, slcan_frame_t *frame_can){
     // 't' + 3(ID) + 1(DLC) + (2 * DLC) data bytes
     // Length is (DLC 8): 21 chars.
     size_t input_len = strlen(input);
-    if (input_len < 21) return false;
+    if (input_len < EXPECTED_SIZE_SLCAN_STD){
+        ESP_LOGI(TAG_UART,"Total Frame has less than %u characters for processing", EXPECTED_SIZE_SLCAN_STD);
+        return false;
+    } 
     //id
     // 3. Parse ID (3 hex digits)
     char can_id[4];
@@ -105,7 +108,10 @@ static bool parse_slcan( const char* input, slcan_frame_t *frame_can){
     frame_can->id = (uint32_t) strtol(can_id, NULL, 16);
     // 4. Parse DLC (1 digit)
     frame_can->dlc = input[4] - '0';// '0' is 48 as uint8_t, refer to ASCII
-    if (frame_can->dlc > LENGTH_SLCAN_DATA) return false;
+    if (frame_can->dlc > LENGTH_SLCAN_DATA){
+        ESP_LOGI(TAG_UART, "Data has more than %u bytes ", LENGTH_SLCAN_DATA);
+        return false;
+    } 
     // 5. Parse Data bytes
     for (uint8_t idx = 0; idx < frame_can->dlc; idx++) {
         char byte_hex[3];
@@ -342,7 +348,7 @@ void transmit_slcan(const motor_state info_motor){
 
     char data_motor[LENGTH_SLCAN_DATA *4];//buffer to store the string of data
     //creates the data hex string ,Numbers of dd pairs must match the data length DLC
-    ESP_LOGI(TAG_UART, "Motor ID: %u pos: %.2f rad, vel: %.2f rad/s, curr: %.2f A, temp: %.2f C,  err: %u",
+    ESP_LOGI(TAG_UART, "Motor ID: %u | P: %.2f rad | V: %.2f rad/s | I: %.2f A | T: %.2f C | err: %u",
                 info_motor.driver_id,
                 info_motor.position,
                 info_motor.velocity,

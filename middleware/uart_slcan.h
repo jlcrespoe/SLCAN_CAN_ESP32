@@ -24,6 +24,7 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 #define LENGTH_SLCAN_DATA 8 // equivalent to LENGTH_CAN_BUFFER
 #define EVENT_QUEUE_SIZE 12
 #define SUPPORTED_COMMANDS 3
+#define EXPECTED_SIZE_SLCAN_STD 21 //EXPECTED LENGTH OF SLCAN standard frame 
 
 #define MAX_FRAMES_PER_BUFFER 10 // Adjust based on expected UART traffic
 

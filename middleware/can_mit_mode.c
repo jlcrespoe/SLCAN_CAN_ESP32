@@ -47,7 +47,7 @@ void comm_can_transmit(const uint32_t driver_id, const uint8_t *data) {
     const int CAN_cmd_check = is_special_command(tx_msg.data);
     if(CAN_cmd_check < 0){
         const motor_control motor_control_frame = unpack_command(tx_msg.data);
-        ESP_LOGI(TAG_CAN, "Control cmd to Motor ID: %u kp: %.2f, kd: %.2f,  % pos: %.2f rad, vel: %.2f rad/s, tor: %.2f N/m",
+        ESP_LOGI(TAG_CAN, "Control cmd to Motor ID: %u | KP: %.2f | KD: %.2f | P: %.2f rad | V: %.2f rad/s | T: %.2f N/m",
                 driver_id,
                 motor_control_frame.k_proportional,
                 motor_control_frame.k_derivate,
