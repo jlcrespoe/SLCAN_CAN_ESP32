@@ -24,6 +24,8 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 #define Kd_MIN  0
 #define Kd_MAX  5.0f
 #define Test_Pos 0.0f
+#define I_MAX 60
+#define I_MIN -I_MAX
 
 int float_to_uint(float x, float x_min, float x_max, unsigned int bits);
 float uint_to_float(int x_int, float x_min, float x_max, int bits);

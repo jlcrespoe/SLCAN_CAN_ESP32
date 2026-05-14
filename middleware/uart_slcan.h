@@ -36,10 +36,12 @@ typedef struct {
     uint32_t driver_id;
     float position;
     float velocity;
-    float torque;
+    float current;
     float temperature;
     uint8_t motor_error;
 } motor_state;
+
+
 
 typedef struct {
     uint32_t id;

@@ -59,6 +59,15 @@ typedef struct {
     float k_derivate;
 } motor_parameters;
 
+//send check
+typedef struct {
+    float position;       
+    float velocity;         
+    float torque;
+    float k_proportional;
+    float k_derivate; 
+} motor_control;
+
 //send mit commands
 typedef struct {
     uint8_t command[LENGTH_CAN_BUFFER];
@@ -68,10 +77,12 @@ typedef struct {
 
 extern const char *TAG_CAN;
 void comm_can_transmit(const uint32_t driver_id, const uint8_t *data);
+const motor_control unpack_command(uint8_t* msg);
 void can_mit_mode_init();
 void print_CAN_status();
 void command_to_all_motors(int action);
 void pack_mit_command( uint8_t * msg,  float p_des,  float v_des,  float kp,  float kd,  float t_ff);
+int is_special_command(uint8_t * msg);
 
 #ifdef __cplusplus
 }           // ← closes extern "C" {

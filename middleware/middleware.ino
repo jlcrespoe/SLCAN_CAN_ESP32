@@ -9,6 +9,31 @@
 // TASK 1: SLCAN (UART) → Decode → Encode MIT MODE → CAN Bus TX
 // Receives SLCAN frames from Jetson and forwards to CAN bus
 // ============================================================
+/**
+ * @brief FreeRTOS task that relays SLCAN frames from UART to CAN bus
+ *
+ * Continuously receives SLCAN-formatted frames from the Jetson controller via UART,
+ * decodes them, and transmits the resulting CAN messages to all 12 motors on the
+ * CAN bus. Acts as a bridge between the host controller and the motor drivers.
+ *
+ * Task behavior:
+ * - Checks if SLCAN channel is open (state_slcan_channel == true)
+ * - Receives and decodes multiple SLCAN frames in one read
+ * - Extracts motor ID and raw CAN data from each frame
+ * - Transmits each frame to the corresponding motor via comm_can_transmit()
+ * - Yields to other tasks with 10ms delay between frames
+ * - If channel closed, logs status and waits 1 second before retry
+ * - If no frames received, prints UART buffer status and waits 1 second
+ *
+ * @param pvParameters FreeRTOS task parameter (unused)
+ *
+ * @note This task runs indefinitely and should be created during setup()
+ * @note Channel can be controlled via special SLCAN commands (O=open, C=close)
+ * @note Requires uart_init() and can_mit_mode_init() to be called first
+ * @see receive_slcan() for UART frame reception
+ * @see comm_can_transmit() for CAN message transmission
+ * @see state_slcan_channel global variable for channel control
+ */
 void slcan_to_can_task(void *pvParameters) {
     uint8_t uart_receive[256]; // Ensure this matches your expected MTU
     for (;;) {
@@ -57,6 +82,33 @@ void slcan_to_can_task(void *pvParameters) {
 // TASK 2: CAN Bus RX → Decode MIT MODE → Encode SLCAN Format → SLCAN (UART)
 // Safely processes CAN frames and forwards to Jetson via UART
 // ============================================================
+/**
+ * @brief FreeRTOS task that relays motor state data from CAN bus to UART
+ *
+ * Continuously monitors the CAN bus for incoming motor state messages,
+ * decodes the MIT-mode response frames, and transmits the motor state
+ * information back to the Jetson controller via UART in SLCAN format.
+ * Acts as the return path for motor feedback.
+ *
+ * Task behavior:
+ * - Checks if SLCAN channel is open (state_slcan_channel == true)
+ * - Waits up to 100ms for CAN messages on the bus
+ * - Decodes received 8-byte MIT mode reply using unpack_reply()
+ * - Converts motor state to SLCAN format and transmits via UART
+ * - If channel closed, logs status and waits 1 second before retry
+ * - If no message received within timeout, prints CAN status and waits 1 second
+ * - Logs detailed motor state information (ID, position, velocity, etc.)
+ *
+ * @param pvParameters FreeRTOS task parameter (unused)
+ *
+ * @note This task runs indefinitely and should be created during setup()
+ * @note Channel state controlled by special commands from the host
+ * @note Requires uart_init() and can_mit_mode_init() to be called first
+ * @see twai_receive() for CAN message reception
+ * @see unpack_reply() for decoding motor state from CAN data
+ * @see transmit_slcan() for UART transmission
+ * @see state_slcan_channel global variable for channel control
+ */
 void can_to_slcan_task(void *pvParameters) {
     twai_message_t  can_msg;
     for (;;) {
@@ -80,6 +132,31 @@ void can_to_slcan_task(void *pvParameters) {
 
 }
 
+/**
+ * @brief Arduino setup function - initializes all hardware and FreeRTOS tasks
+ *
+ * Performs one-time initialization of the ESP32 system:
+ * 1. Sets up logging levels for CAN and UART subsystems to INFO level
+ * 2. Initializes the TWAI/CAN interface at 1 Mbps for motor communication
+ * 3. Initializes UART2 at 115200 baud for Jetson controller communication
+ * 4. Configures the CAN transceiver silent pin (if available) to enable operation
+ * 5. Creates and starts two FreeRTOS tasks for bidirectional communication:
+ *    - slcan_to_can_task: Relays UART commands to motors via CAN
+ *    - can_to_slcan_task: Relays motor feedback from CAN back to UART
+ *
+ * Optional (currently commented out):
+ * - Sends START_READ_MIT command to all 12 motors to enter MIT mode on startup
+ *
+ * @note Configure Core Debug Level to INFO via Tools -> Core Debug in Arduino IDE
+ *       to enable detailed logging output for debugging
+ * @note The TWAI_SLNT_PIN (GPIO 2) is used with TJA1051T/3 transceiver;
+ *       LOW = active, HIGH = silent/standby
+ * @note Both FreeRTOS tasks are created but may not run until scheduler starts
+ * @see can_mit_mode_init() for CAN/TWAI initialization
+ * @see uart_init() for UART initialization
+ * @see slcan_to_can_task() for command relay task
+ * @see can_to_slcan_task() for feedback relay task
+ */
 void setup(){
     //Don't forget to setup Core Level Debug to INFO To watch logs!!! Tools -> Core Debug
     esp_log_level_set(TAG_CAN, ESP_LOG_INFO);

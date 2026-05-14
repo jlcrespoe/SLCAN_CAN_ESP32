@@ -21,7 +21,7 @@ bool state_slcan_channel = true;
 /**
  * @brief Pack motor state data into SLCAN hexadecimal format
  *
- * Encodes motor position, velocity, torque, temperature, and status into
+ * Encodes motor position, velocity, current, temperature, and status into
  * a hexadecimal string suitable for transmission via UART in SLCAN protocol.
  * All values are saturated to their valid ranges and converted to fixed-width
  * integer representations:
@@ -35,35 +35,35 @@ bool state_slcan_channel = true;
  * @param msg_size Size of the msg buffer
  * @param pos Position in radians [-12.5, 12.5]
  * @param vel Velocity in rad/s [-76.0, 76.0]
- * @param t_ff Torque/feedforward in Nm [-12.0, 12.0]
+ * @param curr Current in A [-60.0, 60.0]
  * @param temp_c Temperature in Celsius [-40, 215]
  * @param mot_st Motor status/error code (8-bit value)
  *
  * @note All input values are automatically clamped to their valid ranges
  * @see unpack_reply() for the corresponding decode function
  */
-static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float t_ff, float temp_c, uint8_t mot_st) {
+static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float curr, float temp_c, uint8_t mot_st) {
 
     //Linear Mapping (Converting physical units to raw integers)
     pos = fminf(fmaxf(P_MIN, pos), P_MAX);
     vel = fminf(fmaxf(V_MIN, vel), V_MAX);
-    t_ff = fminf(fmaxf(T_MIN, t_ff), T_MAX);
+    curr = fminf(fmaxf(I_MIN, curr),I_MAX);
     temp_c = fminf(fmaxf(C_MIN, temp_c), C_MAX);
 
     /// convert floats to unsigned ints ///
     int p_int = float_to_uint(pos, P_MIN, P_MAX, 16);
     int v_int = float_to_uint(vel, V_MIN, V_MAX, 12);
-    int t_int = float_to_uint(t_ff, T_MIN, T_MAX, 12);
+    int curr_int = float_to_uint(curr, I_MIN, I_MAX, 12);
     int temp_c_int = float_to_uint(temp_c, C_MIN, C_MAX, 16);
 
     // 3. Masking ensures not bits exist outside the target range
     const uint16_t p_int16 = p_int & 0xFFFF;
     const uint16_t v_int12 = v_int & 0xFFF;
-    const uint16_t t_int12 = t_int & 0xFFF;
+    const uint16_t curr_int12 = curr_int & 0xFFF;
     const uint16_t temp_c_int16 = temp_c_int & 0xFFFF;
 
     //format a hex string that represents 8 bytes of data that's the max of standard SLCAN
-    snprintf(msg, msg_size, "%04x%03x%03x%04x%02x", p_int16, v_int12, t_int12, temp_c_int16, mot_st);
+    snprintf(msg, msg_size, "%04x%03x%03x%04x%02x", p_int16, v_int12, curr_int12, temp_c_int16, mot_st);
 }
 
 /**
@@ -276,7 +276,7 @@ const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uar
  *            - [0]: Motor driver ID
  *            - [1:2]: Position data (16 bits)
  *            - [3:4]: Velocity data (12 bits + 4 padding)
- *            - [4:5]: Torque data (4 bits + 8 bits)
+ *            - [4:5]: Current data (4 bits + 8 bits)
  *            - [6]: Temperature (raw, offset by -40°C)
  *            - [7]: Motor error code
  *
@@ -284,7 +284,7 @@ const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uar
  *         - driver_id: Motor CAN ID
  *         - position: Position in radians
  *         - velocity: Velocity in rad/s
- *         - torque: Torque in Nm
+ *         - current: Current in A
  *         - temperature: Temperature in °C (adjusted from raw value)
  *         - motor_error: Motor error/fault code
  *
@@ -296,17 +296,18 @@ const motor_state unpack_reply(uint8_t* msg){
     const uint8_t id = msg[0]; //Driver ID
     const int pos_int = (msg[1]<<8)|msg[2]; // Motor Position Data
     const int vel_int = (msg[3]<<4)|(msg[4]>>4); // Motor Speed Data
-    const int tor_int = ((msg[4]&0xF)<<8)|msg[5]; //Motor Torque Data
+    const int curr_int = ((msg[4]&0xF)<<8)|msg[5]; //Motor Current Data
     const int tempt_int = msg[6] ; // Temperature range: -40~215
     const uint8_t motor_error = msg[7] ; // motor error code
      /// convert ints to floats ///
     const float pos = uint_to_float(pos_int, P_MIN, P_MAX, 16);
     const float vel = uint_to_float(vel_int, V_MIN, V_MAX, 12);
-    const float tor = uint_to_float(tor_int, T_MIN, T_MAX, 12);
+    const float curr = uint_to_float(curr_int, I_MIN, I_MAX, 12);
     const float tempt = tempt_int;
-    motor_state packet_received = {id, pos, vel, tor, tempt-40, motor_error};
+    motor_state packet_received = {id, pos, vel, curr, tempt-40, motor_error};
     return packet_received;
 }
+
 
 /**
  * @brief Transmit motor state via UART in SLCAN format
@@ -341,11 +342,11 @@ void transmit_slcan(const motor_state info_motor){
 
     char data_motor[LENGTH_SLCAN_DATA *4];//buffer to store the string of data
     //creates the data hex string ,Numbers of dd pairs must match the data length DLC
-    ESP_LOGI(TAG_UART, "Motor ID: %u pos: %.2f vel: %.2f torque: %.2f temp: %.2f err: %u",
+    ESP_LOGI(TAG_UART, "Motor ID: %u pos: %.2f rad, vel: %.2f rad/s, curr: %.2f A, temp: %.2f C,  err: %u",
                 info_motor.driver_id,
                 info_motor.position,
                 info_motor.velocity,
-                info_motor.torque,
+                info_motor.current,
                 info_motor.temperature,
                 info_motor.motor_error
             );
@@ -354,7 +355,7 @@ void transmit_slcan(const motor_state info_motor){
                 sizeof(data_motor),
                 info_motor.position,
                 info_motor.velocity,
-                info_motor.torque,
+                info_motor.current,
                 info_motor.temperature,
                 info_motor.motor_error);
 
