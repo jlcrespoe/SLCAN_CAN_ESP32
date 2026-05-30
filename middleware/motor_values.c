@@ -1,4 +1,41 @@
+#include <stdint.h>
 #include "motor_values.h"
+
+
+// Index 0: Standard Frame Constants
+
+const motor_config_t MOTOR_SPECS[2] = {
+    [0] = { // --- STANDARD FRAME (AK80-6: Completely Symmetric) ---
+        // Sending
+        .p_min_send = -12.5f,  .p_max_send = 12.5f, 
+        .v_min_send = -76.0f,  .v_max_send = 76.0f, 
+        .t_min_send = -12.0f,  .t_max_send = 12.0f,
+        // Receiving (Identical to sending for standard MIT mode)
+        .p_min_recv = -12.5f,  .p_max_recv = 12.5f,
+        .v_min_recv = -76.0f,  .v_max_recv = 76.0f,
+        .t_min_recv = -12.0f,  .t_max_recv = 12.0f,
+        // Tunings & Status
+        .kp_min     = 0.0f,    .kp_max     = 500.0f,
+        .kd_min     = 0.0f,    .kd_max     = 5.0f,
+        .c_min      = -40.0f,  .c_max      = 215.0f,
+        .i_min      = -60.0f,  .i_max      = 60.0f
+    },
+    [1] = { // --- EXTENDED FRAME (AK60-6: Asymmetric Engineering Bounds) ---
+        // Sending (Software Control Boundaries)
+        .p_min_send = -12.56f, .p_max_send = 12.56f, 
+        .v_min_send = -60.0f,  .v_max_send = 60.0f, 
+        .t_min_send = -12.0f,  .t_max_send = 12.0f,
+        // Receiving (Hardware Telemetry Window converted to SI units)
+        .p_min_recv = -55.8505f, .p_max_recv = 55.8505f, // +/- 3200 degrees
+        .v_min_recv = -2393.595f,.v_max_recv = 2393.595f,// +/- 320000 rpm
+        .t_min_recv = -12.0f,    .t_max_recv = 12.0f,
+        // Tunings & Status
+        .kp_min     = 0.0f,    .kp_max     = 500.0f,
+        .kd_min     = 0.0f,    .kd_max     = 5.0f,
+        .c_min      = -20.0f,  .c_max      = 127.0f,
+        .i_min      = -60.0f,  .i_max      = 60.0f
+    }
+};
 
 /**
  * @brief Convert a floating-point value to an unsigned integer with scaling
@@ -18,12 +55,14 @@
  * @note Input x is clamped to [x_min, x_max] before conversion
  * @see uint_to_float() for the inverse operation
  */
-int float_to_uint(float x, float x_min, float x_max, unsigned int bits){
+uint32_t float_to_uint(float x, float x_min, float x_max, unsigned int bits){
     /// Converts a float to an unsigned int, given range and number of bits ///
     float span = x_max - x_min;
     if(x < x_min) x = x_min;
     else if(x > x_max) x = x_max;
-    return (int) ((x- x_min)*((float)((1<<bits)/span)));
+    int result = (uint32_t) ((x- x_min)*((float)((1U<<bits)/span)));
+    if (result >= (1 << bits)) result = (1U << bits) - 1;  // prevent overflow
+    return result;
 }
 
 /**
@@ -42,9 +81,9 @@ int float_to_uint(float x, float x_min, float x_max, unsigned int bits){
  *
  * @see float_to_uint() for the forward conversion
  */
-float uint_to_float(int x_int, float x_min, float x_max, int bits){
+float uint_to_float(uint32_t x_int, float x_min, float x_max, int bits){
     /// converts unsigned int to float, given range and number of bits ///
     float span = x_max - x_min;
     float offset = x_min;
-    return ((float)x_int)*span/((float)((1<<bits)-1)) + offset;
+    return ((float)x_int)*span/((float)((1U<<bits)-1)) + offset;
 }

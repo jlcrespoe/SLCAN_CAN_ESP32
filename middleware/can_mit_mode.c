@@ -180,11 +180,11 @@ void pack_mit_command( uint8_t * msg,  float p_des,  float v_des,  float kp,  fl
     kd = fminf(fmaxf(Kd_MIN, kd), Kd_MAX);
     t_ff = fminf(fmaxf(T_MIN, t_ff), T_MAX);
     /// convert floats to unsigned ints ///
-    const int p_int = float_to_uint(p_des, P_MIN, P_MAX, 16);
-    const int v_int = float_to_uint(v_des, V_MIN, V_MAX, 12);
-    const int kp_int = float_to_uint(kp, Kp_MIN, Kp_MAX, 12);
-    const int kd_int = float_to_uint(kd, Kd_MIN, Kd_MAX, 12);
-    const int t_int = float_to_uint(t_ff, T_MIN, T_MAX, 12);
+    const uint32_t p_int = float_to_uint(p_des, P_MIN, P_MAX, 16);
+    const uint32_t v_int = float_to_uint(v_des, V_MIN, V_MAX, 12);
+    const uint32_t kp_int = float_to_uint(kp, Kp_MIN, Kp_MAX, 12);
+    const uint32_t kd_int = float_to_uint(kd, Kd_MIN, Kd_MAX, 12);
+    const uint32_t t_int = float_to_uint(t_ff, T_MIN, T_MAX, 12);
     /// pack ints into the can buffer ///
     msg[0] = p_int>>8; // Position High 8
     msg[1] = p_int&0xFF; // Position Low 8
@@ -264,16 +264,16 @@ int is_special_command(uint8_t * msg){
 const motor_control unpack_command(uint8_t* msg){
     /// unpack ints from can buffer ///
     //FOR V3 MOTOR
-    // const int kp_int = (msg[0]<<4)|(msg[1]>>4); // KP value command
-    // const int kd_int = ((msg[1]&0xF)<<8)|msg[2];  // KD value command
-    // const int pos_int = (msg[3]<<8)|msg[4]; // Motor Position command
-    // const int vel_int = (msg[5]<<4)|(msg[6]>>4); // Motor Speed command
+    //  const uint32_t kp_int = (msg[0]<<4)|(msg[1]>>4); // KP value command
+    //  const uint32_t kd_int = ((msg[1]&0xF)<<8)|msg[2];  // KD value command
+    //  const uint32_t pos_int = (msg[3]<<8)|msg[4]; // Motor Position command
+    //  const uint32_t vel_int = (msg[5]<<4)|(msg[6]>>4); // Motor Speed command
 
     //for v1 motor current default
-    const int pos_int = (msg[0]<<8)|msg[1]; // Motor Position command
-    const int vel_int = (msg[2]<<4)|(msg[3]>>4); // Motor Speed command
-    const int kp_int = ((msg[3]&0xF)<<8)|msg[4]; // KP value command
-    const int kd_int = (msg[5]<<4)|(msg[6]>>4);  // KD value command
+    const uint32_t pos_int = (msg[0]<<8)|msg[1]; // Motor Position command
+    const uint32_t vel_int = (msg[2]<<4)|(msg[3]>>4); // Motor Speed command
+    const uint32_t kp_int = ((msg[3]&0xF)<<8)|msg[4]; // KP value command
+    const uint32_t kd_int = (msg[5]<<4)|(msg[6]>>4);  // KD value command
 
 
     const int tor_int = ((msg[6]&0xF)<<8)|msg[7]; //Motor Torque command
