@@ -113,8 +113,8 @@ void can_to_slcan_task(void *pvParameters) {
         }
         // Now safe to log and process
         ESP_LOGI(TAG_CAN, "Received ID: 0x%lx DLC: %d", can_msg.identifier, can_msg.data_length_code);
-        motor_state motor_data = unpack_reply(can_msg.data);
-        transmit_slcan(motor_data);
+        motor_state motor_data = unpack_reply(can_msg.data, can_msg.extd, can_msg.identifier);
+        transmit_slcan(motor_data, can_msg.identifier, can_msg.extd);
         
     }
 

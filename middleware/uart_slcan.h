@@ -1,3 +1,4 @@
+#include <stdint.h>
 #ifndef UART_SLCAN_H
 #define UART_SLCAN_H
 
@@ -60,9 +61,9 @@ typedef struct {
 extern const char *TAG_UART;
 extern const char COMMANDS_SLCAN[SUPPORTED_COMMANDS];
 extern bool state_slcan_channel;
-const motor_state unpack_reply(uint8_t* msg);
+const motor_state unpack_reply(uint8_t* msg, uint32_t extended, uint32_t id_msg);
 const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uart);
-void transmit_slcan(const motor_state info_motor);
+void transmit_slcan(const motor_state info_motor, uint32_t can_id , uint32_t extended);
 void print_UART_status();
 void uart_init();
 

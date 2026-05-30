@@ -27,34 +27,37 @@ bool state_slcan_channel = true;
  * integer representations:
  * - Position: 16 bits
  * - Velocity: 12 bits
- * - Torque: 12 bits
+ * - Current: 12 bits
  * - Temperature: 16 bits
  * - Motor status: 8 bits
  *
  * @param msg Pointer to character buffer where hex string is written
  * @param msg_size Size of the msg buffer
- * @param pos Position in radians [-12.5, 12.5]
- * @param vel Velocity in rad/s [-76.0, 76.0]
- * @param curr Current in A [-60.0, 60.0]
- * @param temp_c Temperature in Celsius [-40, 215]
+ * @param pos Position in radians
+ * @param vel Velocity in rad/s
+ * @param curr Current in A 
+ * @param temp_c Temperature in Celsius 
  * @param mot_st Motor status/error code (8-bit value)
  *
  * @note All input values are automatically clamped to their valid ranges
  * @see unpack_reply() for the corresponding decode function
  */
-static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float curr, float temp_c, uint8_t mot_st) {
+static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float curr, float temp_c, uint8_t mot_st, uint32_t extended) {
+
+    // Determine which spec to use based on the frame type
+    const motor_config_t *spec = &MOTOR_SPECS[extended];
 
     //Linear Mapping (Converting physical units to raw integers)
-    pos = fminf(fmaxf(P_MIN, pos), P_MAX);
-    vel = fminf(fmaxf(V_MIN, vel), V_MAX);
-    curr = fminf(fmaxf(I_MIN, curr),I_MAX);
-    temp_c = fminf(fmaxf(C_MIN, temp_c), C_MAX);
+    pos = fminf(fmaxf(spec->p_min_recv, pos), spec->p_max_recv);
+    vel = fminf(fmaxf(spec->v_min_recv, vel), spec->v_max_recv);
+    curr = fminf(fmaxf(spec->i_min, curr),spec->i_max);
+    temp_c = fminf(fmaxf(spec->c_min, temp_c), spec->c_max);
 
     /// convert floats to unsigned ints ///
-    int p_int = float_to_uint(pos, P_MIN, P_MAX, 16);
-    int v_int = float_to_uint(vel, V_MIN, V_MAX, 12);
-    int curr_int = float_to_uint(curr, I_MIN, I_MAX, 12);
-    int temp_c_int = float_to_uint(temp_c, C_MIN, C_MAX, 16);
+    uint32_t p_int = float_to_uint(pos, spec->p_min_recv, spec->p_max_recv, 16);
+    uint32_t v_int = float_to_uint(vel, spec->v_min_recv, spec->v_max_recv, 12);
+    uint32_t curr_int = float_to_uint(curr, spec->i_min, spec->i_max, 12);
+    uint32_t temp_c_int = float_to_uint(temp_c, spec->c_min, spec->c_max, 16);
 
     // 3. Masking ensures not bits exist outside the target range
     const uint16_t p_int16 = p_int & 0xFFFF;
@@ -297,20 +300,38 @@ const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uar
  * @note Temperature returned is adjusted: raw_temp - 40 = °C
  * @see pack_motor_state_to_slcan() for the inverse operation
  */
-const motor_state unpack_reply(uint8_t* msg){
+const motor_state unpack_reply(uint8_t* msg, uint32_t extended, uint32_t id_msg){
+    // Determine which spec to use based on the frame type
+    const motor_config_t *spec = &MOTOR_SPECS[extended];
+    const uint8_t id = id_msg; //Driver ID
+    float pos = 0.0f;
+    float vel = 0.0f;
+    float curr = 0.0f;
+    float tempt = 0.0f;
+    // V3 MOTOR
     /// unpack ints from can buffer ///
-    const uint8_t id = msg[0]; //Driver ID
-    const int pos_int = (msg[1]<<8)|msg[2]; // Motor Position Data
-    const int vel_int = (msg[3]<<4)|(msg[4]>>4); // Motor Speed Data
-    const int curr_int = ((msg[4]&0xF)<<8)|msg[5]; //Motor Current Data
-    const int tempt_int = msg[6] ; // Temperature range: -40~215
+    if(extended){
+        const int16_t pos_int = (msg[0]<<8)|msg[1];
+        const int16_t vel_int = (msg[2]<<8)|msg[3];
+        const int16_t curr_int = (msg[4]<<8)|msg[5];
+        pos = pos_int * 0.1f * 0.01745329251f;//rad
+        vel = vel_int * 10.0f * 0.10471975512f;//rad/s
+        curr = curr_int * 0.01f;
+        const int8_t tempt_raw = msg[6];
+        tempt = (float)tempt_raw;
+    }else{
+        const uint32_t pos_int = (msg[1]<<8)|msg[2];
+        const uint32_t vel_int = (msg[3]<<4)|(msg[4]>>4);
+        const uint32_t curr_int = ((msg[4]&0xF)<<8)|msg[5];
+        /// convert ints to floats ///
+        pos = uint_to_float(pos_int, spec->p_min_recv, spec->p_max_recv, 16);
+        vel = uint_to_float(vel_int, spec->v_min_recv, spec->v_max_recv, 12);
+        curr = uint_to_float(curr_int, spec->i_min, spec->i_max, 12);
+        const int tempt_raw = msg[6];
+        tempt = (float)tempt_raw + spec->c_min;
+    }
     const uint8_t motor_error = msg[7] ; // motor error code
-     /// convert ints to floats ///
-    const float pos = uint_to_float(pos_int, P_MIN, P_MAX, 16);
-    const float vel = uint_to_float(vel_int, V_MIN, V_MAX, 12);
-    const float curr = uint_to_float(curr_int, I_MIN, I_MAX, 12);
-    const float tempt = tempt_int;
-    motor_state packet_received = {id, pos, vel, curr, tempt-40, motor_error};
+    motor_state packet_received = {id, pos, vel, curr, tempt, motor_error};
     return packet_received;
 }
 
@@ -341,9 +362,11 @@ const motor_state unpack_reply(uint8_t* msg){
  * @see receive_slcan() for receiving SLCAN commands from Jetson
  * @see unpack_reply() for decoding incoming motor states
  */
-void transmit_slcan(const motor_state info_motor){
+void transmit_slcan(const motor_state info_motor, uint32_t can_id , uint32_t extended){
 
-    char slcan_command_transmit[LENGTH_SLCAN_DATA*4]; //22 bytes 0-20 tiiildd..[CR] , byte 21 \0
+    //22 bytes 0-20 tiiildd..[CR] , byte 21 \0
+    //26 bytes 0-2 Tiiiiiiiildd...[CR] , byte 27 \0
+    char slcan_command_transmit[LENGTH_SLCAN_DATA*4];
     //Convert the float to its binary representation (4 bytes for single-precision, 8 for double).
 
     char data_motor[LENGTH_SLCAN_DATA *4];//buffer to store the string of data
@@ -363,7 +386,7 @@ void transmit_slcan(const motor_state info_motor){
                 info_motor.velocity,
                 info_motor.current,
                 info_motor.temperature,
-                info_motor.motor_error);
+                info_motor.motor_error, extended);
 
     //Embeddding the hex string into an SLCAN transmit command.
     // Build SLCAN: tIIILDDDDDDDDDDDDDDD\r\0 , \0 is added by the snprintf at the end
@@ -372,8 +395,16 @@ void transmit_slcan(const motor_state info_motor){
     //that is portable across different processors.
     //"8%.16s\r DLC that is always 8 and precision of 16 characters to represent
     //as string the 8 bytes (2 char per byte in hex)
-    snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
-        "t%03" PRIx32 "8%.16s\r", info_motor.driver_id, data_motor);
+    if(extended){
+    // the beginning id for the V3 motor version that is the one which uses extended frame has a value of 8 translated in 21 bits
+    // the other 8 bits corresponds to the motor id to have a total of 29
+        const uint32_t extended_id = (0x800<<8) | (uint8_t)can_id;
+        snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
+            "T%08" PRIx32 "8%.16s\r", extended_id, data_motor);        
+    }else{
+        snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
+            "t%03" PRIx32 "8%.16s\r", info_motor.driver_id, data_motor);
+    }
 
     //send command via UART
     ESP_LOGI(TAG_UART,"Sending to UART slcan  %s", slcan_command_transmit);
