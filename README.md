@@ -148,9 +148,15 @@ From Jetson to Motors
 
 the example string is T00001A28AABBCCDDEEFF0011\rC\rO\rt0018DEADBEEFCAFEBABE\r . Sent as Hex due to limitations of monitor to send multiple CR as string.
 
+<img width="1847" height="778" alt="extended and special frame from slcan" src="https://github.com/user-attachments/assets/34f62742-3c5b-48ab-986e-483597a4f571" />
+
+
 Motors to Jetson
 
 Example motor state ID: 0x801 DLC: 8 , DATA: DE AD FF CA FF BA BE 01
+
+<img width="1808" height="662" alt="extended frame can to slcan" src="https://github.com/user-attachments/assets/3d67c12a-af30-4c83-907f-dec41a1f0f11" />
+
 
 ### Video Demonstration
 
