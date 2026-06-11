@@ -35,9 +35,9 @@ Note: The implementation currently does not support CAN FD commands and frame fo
 ## SLCAN Functions
 
 ```C
-const motor_state unpack_reply(uint8_t* msg);
+const motor_state unpack_reply(uint8_t* msg, uint32_t extended, uint32_t id_msg);
 const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uart);
-void transmit_slcan(const motor_state info_motor);
+void transmit_slcan(const motor_state info_motor, uint32_t can_id , uint32_t extended);
 void print_UART_status();
 void uart_init();
 ```
@@ -46,10 +46,12 @@ void uart_init();
 
 ```C
 void comm_can_transmit(const uint32_t driver_id, const uint8_t *data);
+const motor_control unpack_command(uint8_t* msg);
 void can_mit_mode_init();
 void print_CAN_status();
 void command_to_all_motors(int action);
 void pack_mit_command( uint8_t * msg,  float p_des,  float v_des,  float kp,  float kd,  float t_ff);
+int is_special_command(uint8_t * msg);
 ```
 
 ### Development tools
@@ -70,7 +72,9 @@ Paste the following link
 https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
 ```
 
-Verify and upload code
+Verify and upload code using as target device ""ESP32 Dev Module""
+
+**Don't forget to set Core Debug Level to Info if serial output doesn't show**
 
 ### ESP-IDF
 
@@ -137,6 +141,16 @@ eg: VSCODE Serial Monitor https://marketplace.visualstudio.com/items?itemName=ms
 
 
 <img width="1919" height="1017" alt="Screenshot 2026-05-12 192046" src="https://github.com/user-attachments/assets/05f2f7b8-f76e-48f4-8e75-f3c3f2a3090c" />
+
+Support for extended frame commands and special commands:
+
+From Jetson to Motors
+
+the example string is T00001A28AABBCCDDEEFF0011\rC\rO\rt0018DEADBEEFCAFEBABE\r . Sent as Hex due to limitations of monitor to send multiple CR as string.
+
+Motors to Jetson
+
+Example motor state ID: 0x801 DLC: 8 , DATA: DE AD FF CA FF BA BE 01
 
 ### Video Demonstration
 

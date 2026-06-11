@@ -1,3 +1,4 @@
+#include <stdint.h>
 #ifndef UART_SLCAN_H
 #define UART_SLCAN_H
 
@@ -17,14 +18,14 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 
 #define UART_BAUD_RATE     115200
 #define UART_RTS_THRESHOLD 122
-#define UART_TICKS 100
-
+#define UART_TICKS 20
 #define BUF_SIZE 2048
 #define LENGTH_UART_BUFFER 128
 #define LENGTH_SLCAN_DATA 8 // equivalent to LENGTH_CAN_BUFFER
 #define EVENT_QUEUE_SIZE 12
 #define SUPPORTED_COMMANDS 3
 #define EXPECTED_SIZE_SLCAN_STD 21 //EXPECTED LENGTH OF SLCAN standard frame 
+#define EXPECTED_SIZE_SLCAN_EXT 26 //EXPECTED LENGTH OF SLCAN extended frame 
 
 #define MAX_FRAMES_PER_BUFFER 10 // Adjust based on expected UART traffic
 
@@ -42,14 +43,20 @@ typedef struct {
     uint8_t motor_error;
 } motor_state;
 
-
+typedef enum {
+    SLCAN_FRAME_STD,      // 't' standard frame
+    SLCAN_FRAME_EXT,      // 'T' extended frame
+    SLCAN_CMD_OPEN,       // 'O' open channel
+    SLCAN_CMD_CLOSE,      // 'C' close channel
+} slcan_frame_type_t;
 
 typedef struct {
+    slcan_frame_type_t type;
     uint32_t id;
     uint8_t dlc;
     uint8_t data[LENGTH_SLCAN_DATA];
-    bool is_extended;
-    bool is_rtr;
+    //bool is_extended;
+    //bool is_rtr;
 } slcan_frame_t;
 
 typedef struct {
@@ -58,11 +65,10 @@ typedef struct {
 } slcan_frame_list_t;
 
 extern const char *TAG_UART;
-extern const char COMMANDS_SLCAN[SUPPORTED_COMMANDS];
 extern bool state_slcan_channel;
-const motor_state unpack_reply(uint8_t* msg);
+const motor_state unpack_reply(uint8_t* msg, uint32_t extended, uint32_t id_msg);
 const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uart);
-void transmit_slcan(const motor_state info_motor);
+void transmit_slcan(const motor_state info_motor, uint32_t can_id , uint32_t extended);
 void print_UART_status();
 void uart_init();
 

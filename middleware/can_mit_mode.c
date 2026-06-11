@@ -17,6 +17,8 @@ static const  motor_command MOTOR_CMDS_MIT[] = {
     {SET_HOME_MIT, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}} //set zero position
 };
 
+static const int MOTORS_TYPE[NUMBERS_MOTORS] = {0,0,1,0,1,0,0,0,1,0,0,1,0}; //0 use standard id, 1 use ext id
+
 static const size_t NUM_CMDS = sizeof(MOTOR_CMDS_MIT) / sizeof(MOTOR_CMDS_MIT[0]);
 
 const char *TAG_CAN = "Testudog_CAN"; // FOR LOGGING
@@ -34,28 +36,27 @@ const char *TAG_CAN = "Testudog_CAN"; // FOR LOGGING
  * @note The function blocks until the message is queued or timeout occurs
  * @see comm_can_transmit() is typically called after pack_mit_command()
  */
-void comm_can_transmit(const uint32_t driver_id, const uint8_t *data) {
+void comm_can_transmit(const uint32_t driver_id, const uint8_t *data, int type_id) {
     twai_message_t tx_msg = {
     .identifier = driver_id,
-    .extd = 0,
+    .extd = (uint32_t)type_id,// 0 for standard frame, 1 for extended frame
     .rtr = 0,
     .data_length_code = LENGTH_CAN_BUFFER,
 
     };
     memcpy(tx_msg.data, data, tx_msg.data_length_code);
-
-    const int CAN_cmd_check = is_special_command(tx_msg.data);
-    if(CAN_cmd_check < 0){
-        const motor_control motor_control_frame = unpack_command(tx_msg.data);
-        ESP_LOGI(TAG_CAN, "Control cmd to Motor ID: %u | KP: %.2f | KD: %.2f | P: %.2f rad | V: %.2f rad/s | T: %.2f N/m",
-                driver_id,
-                motor_control_frame.k_proportional,
-                motor_control_frame.k_derivate,
-                motor_control_frame.position,
-                motor_control_frame.velocity,
-                motor_control_frame.torque
-            );
-    }
+    const char* id_type = type_id == 1 ? "ext": "std";
+    const motor_control motor_control_frame = unpack_command(tx_msg.data);
+    ESP_LOGI(TAG_CAN, "Control %s cmd to Motor ID: %u | KP: %.2f | KD: %.2f | P: %.2f rad | V: %.2f rad/s | T: %.2f N/m",
+            id_type,
+            driver_id,
+            motor_control_frame.k_proportional,
+            motor_control_frame.k_derivate,
+            motor_control_frame.position,
+            motor_control_frame.velocity,
+            motor_control_frame.torque
+        );
+    
 
     char hex_str[LENGTH_CAN_BUFFER * 3 + 1]; // "AA BB CC ..." + \0
     for (uint8_t byte_idx = 0; byte_idx < LENGTH_CAN_BUFFER; byte_idx++) {
@@ -139,12 +140,13 @@ void print_CAN_status() {
  *
  * @see MOTOR_CMDS_MIT array for available commands
  * @see NUMBERS_MOTORS constant for motor count
+ * @deprecated Extended frames probably not use these specific commands iterate for each one
  */
 void command_to_all_motors(int action){
 
     for(uint8_t motor_id = TESTUDOG_MOTOR_0; motor_id < NUMBERS_MOTORS ; motor_id++){
         ESP_LOGI(TAG_CAN, "MIT action %i mode on TESTUDOG motor 0x%u....", action, motor_id);
-        comm_can_transmit((uint32_t) motor_id, (uint8_t *)MOTOR_CMDS_MIT[action].command);
+        comm_can_transmit((uint32_t) motor_id, (uint8_t *)MOTOR_CMDS_MIT[action].command, MOTORS_TYPE[motor_id]);
         vTaskDelay(pdMS_TO_TICKS(500)); //wait half second
         ESP_LOGI(TAG_CAN, "Done on %u | %u",motor_id, NUMBERS_MOTORS);
     }
@@ -180,11 +182,11 @@ void pack_mit_command( uint8_t * msg,  float p_des,  float v_des,  float kp,  fl
     kd = fminf(fmaxf(Kd_MIN, kd), Kd_MAX);
     t_ff = fminf(fmaxf(T_MIN, t_ff), T_MAX);
     /// convert floats to unsigned ints ///
-    const int p_int = float_to_uint(p_des, P_MIN, P_MAX, 16);
-    const int v_int = float_to_uint(v_des, V_MIN, V_MAX, 12);
-    const int kp_int = float_to_uint(kp, Kp_MIN, Kp_MAX, 12);
-    const int kd_int = float_to_uint(kd, Kd_MIN, Kd_MAX, 12);
-    const int t_int = float_to_uint(t_ff, T_MIN, T_MAX, 12);
+    const uint32_t p_int = float_to_uint(p_des, P_MIN, P_MAX, 16);
+    const uint32_t v_int = float_to_uint(v_des, V_MIN, V_MAX, 12);
+    const uint32_t kp_int = float_to_uint(kp, Kp_MIN, Kp_MAX, 12);
+    const uint32_t kd_int = float_to_uint(kd, Kd_MIN, Kd_MAX, 12);
+    const uint32_t t_int = float_to_uint(t_ff, T_MIN, T_MAX, 12);
     /// pack ints into the can buffer ///
     msg[0] = p_int>>8; // Position High 8
     msg[1] = p_int&0xFF; // Position Low 8
@@ -264,16 +266,16 @@ int is_special_command(uint8_t * msg){
 const motor_control unpack_command(uint8_t* msg){
     /// unpack ints from can buffer ///
     //FOR V3 MOTOR
-    // const int kp_int = (msg[0]<<4)|(msg[1]>>4); // KP value command
-    // const int kd_int = ((msg[1]&0xF)<<8)|msg[2];  // KD value command
-    // const int pos_int = (msg[3]<<8)|msg[4]; // Motor Position command
-    // const int vel_int = (msg[5]<<4)|(msg[6]>>4); // Motor Speed command
+    //  const uint32_t kp_int = (msg[0]<<4)|(msg[1]>>4); // KP value command
+    //  const uint32_t kd_int = ((msg[1]&0xF)<<8)|msg[2];  // KD value command
+    //  const uint32_t pos_int = (msg[3]<<8)|msg[4]; // Motor Position command
+    //  const uint32_t vel_int = (msg[5]<<4)|(msg[6]>>4); // Motor Speed command
 
     //for v1 motor current default
-    const int pos_int = (msg[0]<<8)|msg[1]; // Motor Position command
-    const int vel_int = (msg[2]<<4)|(msg[3]>>4); // Motor Speed command
-    const int kp_int = ((msg[3]&0xF)<<8)|msg[4]; // KP value command
-    const int kd_int = (msg[5]<<4)|(msg[6]>>4);  // KD value command
+    const uint32_t pos_int = (msg[0]<<8)|msg[1]; // Motor Position command
+    const uint32_t vel_int = (msg[2]<<4)|(msg[3]>>4); // Motor Speed command
+    const uint32_t kp_int = ((msg[3]&0xF)<<8)|msg[4]; // KP value command
+    const uint32_t kd_int = (msg[5]<<4)|(msg[6]>>4);  // KD value command
 
 
     const int tor_int = ((msg[6]&0xF)<<8)|msg[7]; //Motor Torque command

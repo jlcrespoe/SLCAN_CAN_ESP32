@@ -17,12 +17,10 @@
  * CAN bus. Acts as a bridge between the host controller and the motor drivers.
  *
  * Task behavior:
- * - Checks if SLCAN channel is open (state_slcan_channel == true)
  * - Receives and decodes multiple SLCAN frames in one read
  * - Extracts motor ID and raw CAN data from each frame
  * - Transmits each frame to the corresponding motor via comm_can_transmit()
  * - Yields to other tasks with 10ms delay between frames
- * - If channel closed, logs status and waits 1 second before retry
  * - If no frames received, prints UART buffer status and waits 1 second
  *
  * @param pvParameters FreeRTOS task parameter (unused)
@@ -36,31 +34,46 @@
  */
 void slcan_to_can_task(void *pvParameters) {
     uint8_t uart_receive[256]; // Ensure this matches your expected MTU
+    TickType_t last_status_print = 0;   // 
     for (;;) {
-        //if the channel is close can't send from JETSON
             // 1. Receive and Decode
             // We pass the address of our list struct to be filled
             const slcan_frame_list_t *streams_can = receive_slcan(uart_receive, sizeof(uart_receive));
 
             // 2. Check if we actually got frames (count > 0)
             if (streams_can -> count == 0) {
-                print_UART_status();
+                // Only print status once every 1 seconds
+                if ((xTaskGetTickCount() - last_status_print) > pdMS_TO_TICKS(1000)) {
+                    print_UART_status();
+                    last_status_print = xTaskGetTickCount();
+                }
                 // Optional: short delay to prevent watchdog issues if UART is empty
-                vTaskDelay(pdMS_TO_TICKS(1000));
+                vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
 
             }
             ESP_LOGI(TAG_UART, "Received a total of %u streams", streams_can -> count);
             // 3. Iterate through the frames and send to TWAI
             for (size_t idx = 0; idx < streams_can -> count; idx++) {
-
+                
                 const slcan_frame_t *command = &streams_can -> frames[idx];
+                if(command->type == SLCAN_CMD_OPEN){
+                    state_slcan_channel = true;
+                    ESP_LOGI(TAG_UART, "Command to Open Channel");
+                    continue;
+                }
+                if(command->type == SLCAN_CMD_CLOSE){
+                    state_slcan_channel = false;
+                    ESP_LOGI(TAG_UART, "Command to Close Channel");
+                    continue;
+                }
                 const uint8_t* data_can = (uint8_t *)command->data;
 
                 // Send to CAN bus
                 comm_can_transmit(
                     command->id,
-                    data_can
+                    data_can,
+                    command->type
                 );
             // 4. Small yield to let other tasks run
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -113,8 +126,8 @@ void can_to_slcan_task(void *pvParameters) {
         }
         // Now safe to log and process
         ESP_LOGI(TAG_CAN, "Received ID: 0x%lx DLC: %d", can_msg.identifier, can_msg.data_length_code);
-        motor_state motor_data = unpack_reply(can_msg.data);
-        transmit_slcan(motor_data);
+        motor_state motor_data = unpack_reply(can_msg.data, can_msg.extd, can_msg.identifier);
+        transmit_slcan(motor_data, can_msg.identifier, can_msg.extd);
         
     }
 
@@ -155,8 +168,6 @@ void setup(){
     //Set up UAART Controller
     uart_init();
     ESP_LOGI(TAG_UART, "HEY UART READY");
-    //start all motors to MIT MODE
-    //command_to_all_motors(START_READ_MIT);
     #if defined(TWAI_SLNT_PIN)
         pinMode(TWAI_SLNT_PIN, OUTPUT);
         digitalWrite(TWAI_SLNT_PIN, LOW);  // LOW = normal operation
@@ -166,7 +177,7 @@ void setup(){
     xTaskCreatePinnedToCore(slcan_to_can_task, "slcan_to_can_task", 1024*4, NULL, 5, NULL, 0);  
     xTaskCreatePinnedToCore(can_to_slcan_task, "can_to_slcan_task", 1024*4, NULL, 6, NULL, 1);  
 
-    ESP_LOGI(TAG_CAN, "SCRIPT READY");
+    ESP_LOGI(TAG_CAN, "CONTROLLER READY!");
 
 }
 

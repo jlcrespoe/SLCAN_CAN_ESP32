@@ -14,8 +14,8 @@ static QueueHandle_t uart_queue = NULL;
 static slcan_frame_list_t slcan_streams;  // static = invisible outside this file
 const char *TAG_UART = "Testudog_UART"; // FOR LOGGING
 //Holds first characters that identifies each command
-const char COMMANDS_SLCAN[SUPPORTED_COMMANDS] = {'t','O','C'};
-//Control access and flow of the process
+static const char COMMANDS_SLCAN[SUPPORTED_COMMANDS] = {'t','T','O','C'};
+//Control access and flow of the process, use to set state machine 
 bool state_slcan_channel = true;
 
 /**
@@ -27,34 +27,37 @@ bool state_slcan_channel = true;
  * integer representations:
  * - Position: 16 bits
  * - Velocity: 12 bits
- * - Torque: 12 bits
+ * - Current: 12 bits
  * - Temperature: 16 bits
  * - Motor status: 8 bits
  *
  * @param msg Pointer to character buffer where hex string is written
  * @param msg_size Size of the msg buffer
- * @param pos Position in radians [-12.5, 12.5]
- * @param vel Velocity in rad/s [-76.0, 76.0]
- * @param curr Current in A [-60.0, 60.0]
- * @param temp_c Temperature in Celsius [-40, 215]
+ * @param pos Position in radians
+ * @param vel Velocity in rad/s
+ * @param curr Current in A 
+ * @param temp_c Temperature in Celsius 
  * @param mot_st Motor status/error code (8-bit value)
  *
  * @note All input values are automatically clamped to their valid ranges
  * @see unpack_reply() for the corresponding decode function
  */
-static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float curr, float temp_c, uint8_t mot_st) {
+static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, float vel,float curr, float temp_c, uint8_t mot_st, uint32_t extended) {
+
+    // Determine which spec to use based on the frame type
+    const motor_config_t *spec = &MOTOR_SPECS[extended];
 
     //Linear Mapping (Converting physical units to raw integers)
-    pos = fminf(fmaxf(P_MIN, pos), P_MAX);
-    vel = fminf(fmaxf(V_MIN, vel), V_MAX);
-    curr = fminf(fmaxf(I_MIN, curr),I_MAX);
-    temp_c = fminf(fmaxf(C_MIN, temp_c), C_MAX);
+    pos = fminf(fmaxf(spec->p_min_recv, pos), spec->p_max_recv);
+    vel = fminf(fmaxf(spec->v_min_recv, vel), spec->v_max_recv);
+    curr = fminf(fmaxf(spec->i_min, curr),spec->i_max);
+    temp_c = fminf(fmaxf(spec->c_min, temp_c), spec->c_max);
 
     /// convert floats to unsigned ints ///
-    int p_int = float_to_uint(pos, P_MIN, P_MAX, 16);
-    int v_int = float_to_uint(vel, V_MIN, V_MAX, 12);
-    int curr_int = float_to_uint(curr, I_MIN, I_MAX, 12);
-    int temp_c_int = float_to_uint(temp_c, C_MIN, C_MAX, 16);
+    uint32_t p_int = float_to_uint(pos, spec->p_min_recv, spec->p_max_recv, 16);
+    uint32_t v_int = float_to_uint(vel, spec->v_min_recv, spec->v_max_recv, 12);
+    uint32_t curr_int = float_to_uint(curr, spec->i_min, spec->i_max, 12);
+    uint32_t temp_c_int = float_to_uint(temp_c, spec->c_min, spec->c_max, 16);
 
     // 3. Masking ensures not bits exist outside the target range
     const uint16_t p_int16 = p_int & 0xFFFF;
@@ -69,10 +72,11 @@ static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, fl
 /**
  * @brief Parse an SLCAN standard frame string into a structured format
  *
- * Decodes a standard SLCAN frame string (format: 'tIIIDDDDDDDD...') into
- * components: CAN ID, data length code, and data bytes. SLCAN format:
- * - 't' prefix (standard frame)
- * - 3 hex digits for CAN ID
+ * Dispatches to the correct parsing logic based on the leading character:
+ *   - 't': standard frame  (tIIIDDD...)
+ *   - 'T': extended frame  (TIIIIIIIIDDD...)
+ *   - 'O': open-channel command (no payload)
+ *   - 'C': close-channel command (no payload)
  * - 1 digit for DLC (0-8)
  * - 2 hex digits per data byte (up to 8 bytes)
  *
@@ -88,40 +92,116 @@ static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, fl
  */
 static bool parse_slcan( const char* input, slcan_frame_t *frame_can){
 
-    // 1. Basic validation, considering  standard frames only
-    if (input == NULL || input[0] != 't') {
+
+    // 1. Basic validation
+    if (input == NULL) {
         return false;
     }
-    // 2. Length check: A standard 't' frame is:
+    const char prefix = input[0];
+
+    // --- Simple commands: no ID or data to parse ---
+    if (prefix == 'O' || prefix == 'C') {
+        frame_can->type = (prefix == 'O') ? SLCAN_CMD_OPEN : SLCAN_CMD_CLOSE;
+        frame_can->id   = 0;
+        frame_can->dlc  = 0;
+        ESP_LOGI(TAG_UART, "Status channel sent is %i ", frame_can->type);
+        return true;
+    }
+
+    // --- Data frames: standard ('t') or extended ('T') ---
+    bool is_extended;
+    size_t id_hex_digits;        // 3 for std, 8 for ext
+    size_t expected_len;     // minimum string length (DLC=0 case)
+
+    // 2. Length check: 
+    //A standard 't' frame is:
     // 't' + 3(ID) + 1(DLC) + (2 * DLC) data bytes
     // Length is (DLC 8): 21 chars.
+    if (prefix == 't') {
+        is_extended      = false;
+        id_hex_digits    = 3;
+        frame_can->type  = SLCAN_FRAME_STD;
+        expected_len = EXPECTED_SIZE_SLCAN_STD; 
+    //A extended 'T' frame is:
+    // 'T' + 8(ID) + 1(DLC) + (2 * DLC) data bytes
+    // Length is (DLC 8): 26 chars.
+    } else if (prefix == 'T') {
+        is_extended      = true;
+        id_hex_digits    = 8;
+        frame_can->type  = SLCAN_FRAME_EXT;
+        expected_len = EXPECTED_SIZE_SLCAN_EXT;
+    } else {
+        ESP_LOGI(TAG_UART, "Unknown SLCAN prefix: '%c'", prefix);
+        return false;
+    }
     size_t input_len = strlen(input);
-    if (input_len < EXPECTED_SIZE_SLCAN_STD){
-        ESP_LOGI(TAG_UART,"Total Frame has less than %u characters for processing", EXPECTED_SIZE_SLCAN_STD);
+    if (input_len != expected_len){
+        ESP_LOGI(TAG_UART,"Frame has discrepancy in length, expected: %u, actual: %u", expected_len ,input_len);
         return false;
     } 
+
+
     //id
     // 3. Parse ID (3 hex digits)
-    char can_id[4];
-    memcpy(can_id, &input[1], 3);
-    can_id[3] = '\0';
-    frame_can->id = (uint32_t) strtol(can_id, NULL, 16);
-    // 4. Parse DLC (1 digit)
-    frame_can->dlc = input[4] - '0';// '0' is 48 as uint8_t, refer to ASCII
-    if (frame_can->dlc > LENGTH_SLCAN_DATA){
-        ESP_LOGI(TAG_UART, "Data has more than %u bytes ", LENGTH_SLCAN_DATA);
+    char can_id[9]; // max 8 digits + null
+    memcpy(can_id, &input[1], id_hex_digits);
+    can_id[id_hex_digits] = '\0';
+    frame_can->id = (uint32_t)strtol(can_id, NULL, 16);
+
+    // Extended frames: validate 29-bit ID range
+    if (is_extended && frame_can->id > 0x1FFFFFFF) {
+        ESP_LOGI(TAG_UART, "Extended ID out of 29-bit range: 0x%08X", (unsigned)frame_can->id);
         return false;
-    } 
+    }
+
+    // Parse DLC — sits right after the ID digits
+    const size_t dlc_offset = 1 + id_hex_digits;  // 4 for std, 9 for ext
+    frame_can->dlc = input[dlc_offset] - '0';
+    if (frame_can->dlc > LENGTH_SLCAN_DATA) {
+        ESP_LOGI(TAG_UART, "DLC %u exceeds max %u", frame_can->dlc, LENGTH_SLCAN_DATA);
+        return false;
+    }
+
+    // Validate total length now that we know DLC
+    size_t expected_total = 1 + id_hex_digits + 1 + (2 * frame_can->dlc);
+    if (input_len < expected_total) {
+        ESP_LOGI(TAG_UART, "Frame data too short for DLC=%u", frame_can->dlc);
+        return false;
+    }
+
     // 5. Parse Data bytes
+    const uint8_t data_offset = dlc_offset + 1;    // first data nibble index
     for (uint8_t idx = 0; idx < frame_can->dlc; idx++) {
         char byte_hex[3];
-        byte_hex[0] = input[5 + (idx * 2)];
-        byte_hex[1] = input[6 + (idx * 2)];
+        byte_hex[0] = input[data_offset + (idx * 2)];
+        byte_hex[1] = input[data_offset + (idx * 2) +1];
         byte_hex[2] = '\0';
         frame_can->data[idx] = (uint8_t)strtol(byte_hex, NULL, 16);
     }
     return true;
 }
+
+
+/**
+ * @brief Find the next SLCAN frame start in a string
+ *
+ * Scans forward from ptr for any recognized SLCAN prefix character.
+ * Centralises the "skip noise" logic that was previously hardcoded for 't'.
+ *
+ * @param ptr  Start of search region (null-terminated)
+ * @return     Pointer to first recognised prefix, or NULL if none found
+ */
+static char* find_slcan_frame_start(char *ptr) {
+    while (*ptr != '\0') {
+        if (*ptr == 't' || *ptr == 'T' || *ptr == 'O' || *ptr == 'C') {
+            return ptr;
+        }
+        ptr++;
+    }
+    return NULL;
+}
+
+
 
 /**
  * @brief Decode multiple SLCAN frames from a UART buffer
@@ -151,7 +231,7 @@ static void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_fra
         *frame_end = '\0'; // Terminate the individual SLCAN string
 
         // Find the actual start of the command (skip any \n or noise)
-        char *frame_start = strchr(ptr, 't');
+        char *frame_start = find_slcan_frame_start(ptr);
 
         if (frame_start != NULL) {
             slcan_frame_t frame_process;
@@ -168,71 +248,7 @@ static void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_fra
     }
 }
 
-/**
- * @brief Handle special SLCAN control commands
- *
- * Processes special commands that control the SLCAN channel state or query its status:
- * - Command 1: Open the SLCAN channel (enable motor CAN message transmission)
- * - Command 2: Close the SLCAN channel (disable motor CAN message transmission)
- * - Command 0 or other: Refers to standard command slcan frame with prefix 't'
- *
- * @param special_cmd Command code: 1 (open), 2 (close), or other
- *
- * @note Affects global state_slcan_channel variable
- * @see search_and_set_special_command() to extract and process commands from UART buffer
- */
-void set_special_command(uint8_t special_cmd){
-    switch(special_cmd){
-        case 2:
-            state_slcan_channel = false;
-            ESP_LOGI(TAG_UART, "Closed SLCAN Channel");
-            break;
-        case 1:
-            state_slcan_channel = true;
-            ESP_LOGI(TAG_UART, "Opened SLCAN Channel");
-            break;
-        default:
-            char* channel_state_action = state_slcan_channel ? "Open" : "Close";
-            ESP_LOGI(TAG_UART, "SLCAN CHANNEL STATUS: %s", channel_state_action);
-            break;
-    }
-}
 
-/**
- * @brief Search for and execute special SLCAN commands in a UART buffer
- *
- * Scans a UART receive buffer for special command characters ('t', 'O', 'C')
- * as defined in COMMANDS_SLCAN and executes the corresponding set_special_command().
- * Currently supports:
- * - 't': Standard frame (not a special command, skipped)
- * - 'O': Open SLCAN channel (command index 1)
- * - 'C': Close SLCAN channel (command index 2)
- *
- * @param uart_buffer Pointer to UART receive buffer containing potential special commands
- *
- * @note Processes commands separated by carriage returns ('\r')
- * @note First character of each line is checked against COMMANDS_SLCAN array
- * @note Modifies global state_slcan_channel variable based on commands
- * @see set_special_command() for the command execution logic
- */
-void search_and_set_special_command(uint8_t *uart_buffer){
-    char *ptr = (char *)uart_buffer;
-    char *frame_end;
-    // Use strchr to find each terminator in the buffer
-    while ((frame_end = strchr(ptr, '\r')) != NULL) {
-        // check the FIRST char of the frame
-        char check_command = *ptr;
-
-        for (int idx = SUPPORTED_COMMANDS - 1; idx >= 0; idx--) {
-            if (check_command == COMMANDS_SLCAN[idx]) {
-                set_special_command(idx);
-                break; // found a match, stop searching
-            }
-        }
-
-        ptr = frame_end + 1; // ✅ advance past current frame
-    }
-}
 
 /**
  * @brief Receive and parse SLCAN frames from UART
@@ -257,7 +273,7 @@ const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uar
     // Reset the count at the start
     slcan_streams.count = 0;
 
-    int len_received = uart_read_bytes(PORT_UART, uart_buffer, max_len_uart - 1, UART_TICKS);
+    int len_received = uart_read_bytes(PORT_UART, uart_buffer, max_len_uart - 1, pdMS_TO_TICKS(UART_TICKS));
 
     if (len_received <= 0) return &slcan_streams;
     // Ensure the whole buffer is null-terminated at the end of the data received
@@ -297,20 +313,38 @@ const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uar
  * @note Temperature returned is adjusted: raw_temp - 40 = °C
  * @see pack_motor_state_to_slcan() for the inverse operation
  */
-const motor_state unpack_reply(uint8_t* msg){
+const motor_state unpack_reply(uint8_t* msg, uint32_t extended, uint32_t id_msg){
+    // Determine which spec to use based on the frame type
+    const motor_config_t *spec = &MOTOR_SPECS[extended];
+    const uint8_t id = id_msg; //Driver ID
+    float pos = 0.0f;
+    float vel = 0.0f;
+    float curr = 0.0f;
+    float tempt = 0.0f;
+    // V3 MOTOR
     /// unpack ints from can buffer ///
-    const uint8_t id = msg[0]; //Driver ID
-    const int pos_int = (msg[1]<<8)|msg[2]; // Motor Position Data
-    const int vel_int = (msg[3]<<4)|(msg[4]>>4); // Motor Speed Data
-    const int curr_int = ((msg[4]&0xF)<<8)|msg[5]; //Motor Current Data
-    const int tempt_int = msg[6] ; // Temperature range: -40~215
+    if(extended){
+        const int16_t pos_int = (msg[0]<<8)|msg[1];
+        const int16_t vel_int = (msg[2]<<8)|msg[3];
+        const int16_t curr_int = (msg[4]<<8)|msg[5];
+        pos = pos_int * 0.1f * 0.01745329251f;//rad
+        vel = vel_int * 10.0f * 0.10471975512f;//rad/s
+        curr = curr_int * 0.01f;
+        const int8_t tempt_raw = msg[6];
+        tempt = (float)tempt_raw;
+    }else{
+        const uint32_t pos_int = (msg[1]<<8)|msg[2];
+        const uint32_t vel_int = (msg[3]<<4)|(msg[4]>>4);
+        const uint32_t curr_int = ((msg[4]&0xF)<<8)|msg[5];
+        /// convert ints to floats ///
+        pos = uint_to_float(pos_int, spec->p_min_recv, spec->p_max_recv, 16);
+        vel = uint_to_float(vel_int, spec->v_min_recv, spec->v_max_recv, 12);
+        curr = uint_to_float(curr_int, spec->i_min, spec->i_max, 12);
+        const int tempt_raw = msg[6];
+        tempt = (float)tempt_raw + spec->c_min;
+    }
     const uint8_t motor_error = msg[7] ; // motor error code
-     /// convert ints to floats ///
-    const float pos = uint_to_float(pos_int, P_MIN, P_MAX, 16);
-    const float vel = uint_to_float(vel_int, V_MIN, V_MAX, 12);
-    const float curr = uint_to_float(curr_int, I_MIN, I_MAX, 12);
-    const float tempt = tempt_int;
-    motor_state packet_received = {id, pos, vel, curr, tempt-40, motor_error};
+    motor_state packet_received = {id, pos, vel, curr, tempt, motor_error};
     return packet_received;
 }
 
@@ -341,9 +375,11 @@ const motor_state unpack_reply(uint8_t* msg){
  * @see receive_slcan() for receiving SLCAN commands from Jetson
  * @see unpack_reply() for decoding incoming motor states
  */
-void transmit_slcan(const motor_state info_motor){
+void transmit_slcan(const motor_state info_motor, uint32_t can_id , uint32_t extended){
 
-    char slcan_command_transmit[LENGTH_SLCAN_DATA*4]; //22 bytes 0-20 tiiildd..[CR] , byte 21 \0
+    //22 bytes 0-20 tiiildd..[CR] , byte 21 \0
+    //26 bytes 0-2 Tiiiiiiiildd...[CR] , byte 27 \0
+    char slcan_command_transmit[LENGTH_SLCAN_DATA*4];
     //Convert the float to its binary representation (4 bytes for single-precision, 8 for double).
 
     char data_motor[LENGTH_SLCAN_DATA *4];//buffer to store the string of data
@@ -363,7 +399,7 @@ void transmit_slcan(const motor_state info_motor){
                 info_motor.velocity,
                 info_motor.current,
                 info_motor.temperature,
-                info_motor.motor_error);
+                info_motor.motor_error, extended);
 
     //Embeddding the hex string into an SLCAN transmit command.
     // Build SLCAN: tIIILDDDDDDDDDDDDDDD\r\0 , \0 is added by the snprintf at the end
@@ -372,8 +408,16 @@ void transmit_slcan(const motor_state info_motor){
     //that is portable across different processors.
     //"8%.16s\r DLC that is always 8 and precision of 16 characters to represent
     //as string the 8 bytes (2 char per byte in hex)
-    snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
-        "t%03" PRIx32 "8%.16s\r", info_motor.driver_id, data_motor);
+    if(extended){
+    // the beginning id for the V3 motor version that is the one which uses extended frame has a value of 8 translated in 21 bits
+    // the other 8 bits corresponds to the motor id to have a total of 29
+        const uint32_t extended_id = (0x800<<8) | (uint8_t)can_id;
+        snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
+            "T%08" PRIx32 "8%.16s\r", extended_id, data_motor);        
+    }else{
+        snprintf(slcan_command_transmit, sizeof(slcan_command_transmit),
+            "t%03" PRIx32 "8%.16s\r", info_motor.driver_id, data_motor);
+    }
 
     //send command via UART
     ESP_LOGI(TAG_UART,"Sending to UART slcan  %s", slcan_command_transmit);
@@ -442,5 +486,5 @@ void uart_init(){
     ESP_ERROR_CHECK(uart_set_pin(PORT_UART, UART_TXD_PIN, UART_RXD_PIN, -1, -1));
     //
     ESP_LOGI(TAG_UART, "UART testudog controller started \n");
-    vTaskDelay(pdMS_TO_TICKS(1000)); //wait x second
+    vTaskDelay(pdMS_TO_TICKS(100)); //wait x second
 }

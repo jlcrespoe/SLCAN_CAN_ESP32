@@ -27,8 +27,30 @@ extern "C" {          // ← tells C++ linker: look for plain C names
 #define I_MAX 60
 #define I_MIN -I_MAX
 
-int float_to_uint(float x, float x_min, float x_max, unsigned int bits);
-float uint_to_float(int x_int, float x_min, float x_max, int bits);
+
+typedef struct {
+    // ---- Outbound Control Limits (Sending Commands) ----
+    float p_min_send,  p_max_send;  // Bounds used to PACK commands
+    float v_min_send,  v_max_send;
+    float t_min_send,  t_max_send;
+    
+    // ---- Inbound Telemetry Limits (Receiving Feedback) ----
+    float p_min_recv,  p_max_recv;  // Bounds used to UNPACK motor state
+    float v_min_recv,  v_max_recv;
+    float t_min_recv,  t_max_recv;
+    
+    // ---- Shared Tuning & Status Ranges ----
+    float kp_min,      kp_max;
+    float kd_min,      kd_max;
+    float c_min,       c_max;       // Temperature bounds
+    float i_min,       i_max;       // Current bounds
+} motor_config_t;
+
+extern const motor_config_t MOTOR_SPECS[2];
+
+uint32_t float_to_uint(float x, float x_min, float x_max, unsigned int bits);
+float uint_to_float(uint32_t x_int, float x_min, float x_max, int bits);
+
 
 
 #ifdef __cplusplus
