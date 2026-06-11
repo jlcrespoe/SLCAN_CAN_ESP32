@@ -142,6 +142,16 @@ eg: VSCODE Serial Monitor https://marketplace.visualstudio.com/items?itemName=ms
 
 <img width="1919" height="1017" alt="Screenshot 2026-05-12 192046" src="https://github.com/user-attachments/assets/05f2f7b8-f76e-48f4-8e75-f3c3f2a3090c" />
 
+Support for extended frame commands and special commands:
+
+From Jetson to Motors
+
+the example string is T00001A28AABBCCDDEEFF0011\rC\rO\rt0018DEADBEEFCAFEBABE\r . Sent as Hex due to limitations of monitor to send multiple CR as string.
+
+Motors to Jetson
+
+Example motor state ID: 0x801 DLC: 8 , DATA: DE AD FF CA FF BA BE 01
+
 ### Video Demonstration
 
 https://drive.google.com/file/d/1UatcpAc-OzGxBs7l8eiN7t0109Oto_Fn/view?usp=sharing

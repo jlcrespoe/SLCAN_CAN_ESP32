@@ -14,8 +14,8 @@ static QueueHandle_t uart_queue = NULL;
 static slcan_frame_list_t slcan_streams;  // static = invisible outside this file
 const char *TAG_UART = "Testudog_UART"; // FOR LOGGING
 //Holds first characters that identifies each command
-const char COMMANDS_SLCAN[SUPPORTED_COMMANDS] = {'t','O','C'};
-//Control access and flow of the process
+static const char COMMANDS_SLCAN[SUPPORTED_COMMANDS] = {'t','T','O','C'};
+//Control access and flow of the process, use to set state machine 
 bool state_slcan_channel = true;
 
 /**
@@ -72,10 +72,11 @@ static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, fl
 /**
  * @brief Parse an SLCAN standard frame string into a structured format
  *
- * Decodes a standard SLCAN frame string (format: 'tIIIDDDDDDDD...') into
- * components: CAN ID, data length code, and data bytes. SLCAN format:
- * - 't' prefix (standard frame)
- * - 3 hex digits for CAN ID
+ * Dispatches to the correct parsing logic based on the leading character:
+ *   - 't': standard frame  (tIIIDDD...)
+ *   - 'T': extended frame  (TIIIIIIIIDDD...)
+ *   - 'O': open-channel command (no payload)
+ *   - 'C': close-channel command (no payload)
  * - 1 digit for DLC (0-8)
  * - 2 hex digits per data byte (up to 8 bytes)
  *
@@ -91,40 +92,116 @@ static void pack_motor_state_to_slcan(char * msg, size_t msg_size, float pos, fl
  */
 static bool parse_slcan( const char* input, slcan_frame_t *frame_can){
 
-    // 1. Basic validation, considering  standard frames only
-    if (input == NULL || input[0] != 't') {
+
+    // 1. Basic validation
+    if (input == NULL) {
         return false;
     }
-    // 2. Length check: A standard 't' frame is:
+    const char prefix = input[0];
+
+    // --- Simple commands: no ID or data to parse ---
+    if (prefix == 'O' || prefix == 'C') {
+        frame_can->type = (prefix == 'O') ? SLCAN_CMD_OPEN : SLCAN_CMD_CLOSE;
+        frame_can->id   = 0;
+        frame_can->dlc  = 0;
+        ESP_LOGI(TAG_UART, "Status channel sent is %i ", frame_can->type);
+        return true;
+    }
+
+    // --- Data frames: standard ('t') or extended ('T') ---
+    bool is_extended;
+    size_t id_hex_digits;        // 3 for std, 8 for ext
+    size_t expected_len;     // minimum string length (DLC=0 case)
+
+    // 2. Length check: 
+    //A standard 't' frame is:
     // 't' + 3(ID) + 1(DLC) + (2 * DLC) data bytes
     // Length is (DLC 8): 21 chars.
+    if (prefix == 't') {
+        is_extended      = false;
+        id_hex_digits    = 3;
+        frame_can->type  = SLCAN_FRAME_STD;
+        expected_len = EXPECTED_SIZE_SLCAN_STD; 
+    //A extended 'T' frame is:
+    // 'T' + 8(ID) + 1(DLC) + (2 * DLC) data bytes
+    // Length is (DLC 8): 26 chars.
+    } else if (prefix == 'T') {
+        is_extended      = true;
+        id_hex_digits    = 8;
+        frame_can->type  = SLCAN_FRAME_EXT;
+        expected_len = EXPECTED_SIZE_SLCAN_EXT;
+    } else {
+        ESP_LOGI(TAG_UART, "Unknown SLCAN prefix: '%c'", prefix);
+        return false;
+    }
     size_t input_len = strlen(input);
-    if (input_len < EXPECTED_SIZE_SLCAN_STD){
-        ESP_LOGI(TAG_UART,"Total Frame has less than %u characters for processing", EXPECTED_SIZE_SLCAN_STD);
+    if (input_len != expected_len){
+        ESP_LOGI(TAG_UART,"Frame has discrepancy in length, expected: %u, actual: %u", expected_len ,input_len);
         return false;
     } 
+
+
     //id
     // 3. Parse ID (3 hex digits)
-    char can_id[4];
-    memcpy(can_id, &input[1], 3);
-    can_id[3] = '\0';
-    frame_can->id = (uint32_t) strtol(can_id, NULL, 16);
-    // 4. Parse DLC (1 digit)
-    frame_can->dlc = input[4] - '0';// '0' is 48 as uint8_t, refer to ASCII
-    if (frame_can->dlc > LENGTH_SLCAN_DATA){
-        ESP_LOGI(TAG_UART, "Data has more than %u bytes ", LENGTH_SLCAN_DATA);
+    char can_id[9]; // max 8 digits + null
+    memcpy(can_id, &input[1], id_hex_digits);
+    can_id[id_hex_digits] = '\0';
+    frame_can->id = (uint32_t)strtol(can_id, NULL, 16);
+
+    // Extended frames: validate 29-bit ID range
+    if (is_extended && frame_can->id > 0x1FFFFFFF) {
+        ESP_LOGI(TAG_UART, "Extended ID out of 29-bit range: 0x%08X", (unsigned)frame_can->id);
         return false;
-    } 
+    }
+
+    // Parse DLC — sits right after the ID digits
+    const size_t dlc_offset = 1 + id_hex_digits;  // 4 for std, 9 for ext
+    frame_can->dlc = input[dlc_offset] - '0';
+    if (frame_can->dlc > LENGTH_SLCAN_DATA) {
+        ESP_LOGI(TAG_UART, "DLC %u exceeds max %u", frame_can->dlc, LENGTH_SLCAN_DATA);
+        return false;
+    }
+
+    // Validate total length now that we know DLC
+    size_t expected_total = 1 + id_hex_digits + 1 + (2 * frame_can->dlc);
+    if (input_len < expected_total) {
+        ESP_LOGI(TAG_UART, "Frame data too short for DLC=%u", frame_can->dlc);
+        return false;
+    }
+
     // 5. Parse Data bytes
+    const uint8_t data_offset = dlc_offset + 1;    // first data nibble index
     for (uint8_t idx = 0; idx < frame_can->dlc; idx++) {
         char byte_hex[3];
-        byte_hex[0] = input[5 + (idx * 2)];
-        byte_hex[1] = input[6 + (idx * 2)];
+        byte_hex[0] = input[data_offset + (idx * 2)];
+        byte_hex[1] = input[data_offset + (idx * 2) +1];
         byte_hex[2] = '\0';
         frame_can->data[idx] = (uint8_t)strtol(byte_hex, NULL, 16);
     }
     return true;
 }
+
+
+/**
+ * @brief Find the next SLCAN frame start in a string
+ *
+ * Scans forward from ptr for any recognized SLCAN prefix character.
+ * Centralises the "skip noise" logic that was previously hardcoded for 't'.
+ *
+ * @param ptr  Start of search region (null-terminated)
+ * @return     Pointer to first recognised prefix, or NULL if none found
+ */
+static char* find_slcan_frame_start(char *ptr) {
+    while (*ptr != '\0') {
+        if (*ptr == 't' || *ptr == 'T' || *ptr == 'O' || *ptr == 'C') {
+            return ptr;
+        }
+        ptr++;
+    }
+    return NULL;
+}
+
+
 
 /**
  * @brief Decode multiple SLCAN frames from a UART buffer
@@ -154,7 +231,7 @@ static void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_fra
         *frame_end = '\0'; // Terminate the individual SLCAN string
 
         // Find the actual start of the command (skip any \n or noise)
-        char *frame_start = strchr(ptr, 't');
+        char *frame_start = find_slcan_frame_start(ptr);
 
         if (frame_start != NULL) {
             slcan_frame_t frame_process;
@@ -171,71 +248,7 @@ static void decode_slcan(uint8_t *uart_buffer, int length_buffer_uart, slcan_fra
     }
 }
 
-/**
- * @brief Handle special SLCAN control commands
- *
- * Processes special commands that control the SLCAN channel state or query its status:
- * - Command 1: Open the SLCAN channel (enable motor CAN message transmission)
- * - Command 2: Close the SLCAN channel (disable motor CAN message transmission)
- * - Command 0 or other: Refers to standard command slcan frame with prefix 't'
- *
- * @param special_cmd Command code: 1 (open), 2 (close), or other
- *
- * @note Affects global state_slcan_channel variable
- * @see search_and_set_special_command() to extract and process commands from UART buffer
- */
-void set_special_command(uint8_t special_cmd){
-    switch(special_cmd){
-        case 2:
-            state_slcan_channel = false;
-            ESP_LOGI(TAG_UART, "Closed SLCAN Channel");
-            break;
-        case 1:
-            state_slcan_channel = true;
-            ESP_LOGI(TAG_UART, "Opened SLCAN Channel");
-            break;
-        default:
-            char* channel_state_action = state_slcan_channel ? "Open" : "Close";
-            ESP_LOGI(TAG_UART, "SLCAN CHANNEL STATUS: %s", channel_state_action);
-            break;
-    }
-}
 
-/**
- * @brief Search for and execute special SLCAN commands in a UART buffer
- *
- * Scans a UART receive buffer for special command characters ('t', 'O', 'C')
- * as defined in COMMANDS_SLCAN and executes the corresponding set_special_command().
- * Currently supports:
- * - 't': Standard frame (not a special command, skipped)
- * - 'O': Open SLCAN channel (command index 1)
- * - 'C': Close SLCAN channel (command index 2)
- *
- * @param uart_buffer Pointer to UART receive buffer containing potential special commands
- *
- * @note Processes commands separated by carriage returns ('\r')
- * @note First character of each line is checked against COMMANDS_SLCAN array
- * @note Modifies global state_slcan_channel variable based on commands
- * @see set_special_command() for the command execution logic
- */
-void search_and_set_special_command(uint8_t *uart_buffer){
-    char *ptr = (char *)uart_buffer;
-    char *frame_end;
-    // Use strchr to find each terminator in the buffer
-    while ((frame_end = strchr(ptr, '\r')) != NULL) {
-        // check the FIRST char of the frame
-        char check_command = *ptr;
-
-        for (int idx = SUPPORTED_COMMANDS - 1; idx >= 0; idx--) {
-            if (check_command == COMMANDS_SLCAN[idx]) {
-                set_special_command(idx);
-                break; // found a match, stop searching
-            }
-        }
-
-        ptr = frame_end + 1; // ✅ advance past current frame
-    }
-}
 
 /**
  * @brief Receive and parse SLCAN frames from UART
@@ -260,7 +273,7 @@ const slcan_frame_list_t* receive_slcan(uint8_t *uart_buffer, size_t max_len_uar
     // Reset the count at the start
     slcan_streams.count = 0;
 
-    int len_received = uart_read_bytes(PORT_UART, uart_buffer, max_len_uart - 1, UART_TICKS);
+    int len_received = uart_read_bytes(PORT_UART, uart_buffer, max_len_uart - 1, pdMS_TO_TICKS(UART_TICKS));
 
     if (len_received <= 0) return &slcan_streams;
     // Ensure the whole buffer is null-terminated at the end of the data received
@@ -473,5 +486,5 @@ void uart_init(){
     ESP_ERROR_CHECK(uart_set_pin(PORT_UART, UART_TXD_PIN, UART_RXD_PIN, -1, -1));
     //
     ESP_LOGI(TAG_UART, "UART testudog controller started \n");
-    vTaskDelay(pdMS_TO_TICKS(1000)); //wait x second
+    vTaskDelay(pdMS_TO_TICKS(100)); //wait x second
 }
