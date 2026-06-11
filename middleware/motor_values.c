@@ -7,9 +7,9 @@
 const motor_config_t MOTOR_SPECS[2] = {
     [0] = { // --- STANDARD FRAME (AK80-6: Completely Symmetric) ---
         // Sending
-        .p_min_send = -12.5f,  .p_max_send = 12.5f, 
-        .v_min_send = -76.0f,  .v_max_send = 76.0f, 
-        .t_min_send = -12.0f,  .t_max_send = 12.0f,
+        .p_min_send = -12.5f,  .p_max_send = 12.5f, // radians
+        .v_min_send = -76.0f,  .v_max_send = 76.0f, // rad/s
+        .t_min_send = -12.0f,  .t_max_send = 12.0f, // N*m
         // Receiving (Identical to sending for standard MIT mode)
         .p_min_recv = -12.5f,  .p_max_recv = 12.5f,
         .v_min_recv = -76.0f,  .v_max_recv = 76.0f,
@@ -17,8 +17,8 @@ const motor_config_t MOTOR_SPECS[2] = {
         // Tunings & Status
         .kp_min     = 0.0f,    .kp_max     = 500.0f,
         .kd_min     = 0.0f,    .kd_max     = 5.0f,
-        .c_min      = -40.0f,  .c_max      = 215.0f,
-        .i_min      = -60.0f,  .i_max      = 60.0f
+        .c_min      = -40.0f,  .c_max      = 215.0f, //celcius
+        .i_min      = -60.0f,  .i_max      = 60.0f // Amperes(A)
     },
     [1] = { // --- EXTENDED FRAME (AK60-6: Asymmetric Engineering Bounds) ---
         // Sending (Software Control Boundaries)
@@ -60,8 +60,8 @@ uint32_t float_to_uint(float x, float x_min, float x_max, unsigned int bits){
     float span = x_max - x_min;
     if(x < x_min) x = x_min;
     else if(x > x_max) x = x_max;
-    int result = (uint32_t) ((x- x_min)*((float)((1U<<bits)/span)));
-    if (result >= (1 << bits)) result = (1U << bits) - 1;  // prevent overflow
+    uint32_t result = (uint32_t) ((x- x_min)*((float)((1U<<bits)/span)));
+    if (result >= (1U << bits)) result = (1U << bits) - 1;  // prevent overflow
     return result;
 }
 
@@ -85,5 +85,5 @@ float uint_to_float(uint32_t x_int, float x_min, float x_max, int bits){
     /// converts unsigned int to float, given range and number of bits ///
     float span = x_max - x_min;
     float offset = x_min;
-    return ((float)x_int)*span/((float)((1U<<bits)-1)) + offset;
+    return ((float)x_int)*span/((float)((1U << bits)-1)) + offset;
 }

@@ -76,7 +76,7 @@ typedef struct {
 
 
 extern const char *TAG_CAN;
-void comm_can_transmit(const uint32_t driver_id, const uint8_t *data);
+void comm_can_transmit(const uint32_t driver_id, const uint8_t *data, int type_id);
 const motor_control unpack_command(uint8_t* msg);
 void can_mit_mode_init();
 void print_CAN_status();
